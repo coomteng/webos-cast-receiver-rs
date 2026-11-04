@@ -18,11 +18,13 @@ use url::Url;
 
 const MAX_REDIRECTS: usize = 5;
 const MAX_ENTRIES: usize = 2000;
-/// Prefetch: bytes buffered ahead of the screen's first request. The TV asks
-/// ~1.3 s after `load`; by then the CDN handshake + TTFB are done and the
-/// first chunk is in memory. Beyond this the prefetch task pauses and lets
-/// the real consumer pull (it does not race ahead of the player).
-const PREFETCH_BYTES: usize = 2 * 1024 * 1024;
+/// Prefetch: the upstream request for a new clip is opened the moment the
+/// phone sets the URI, and is registered as soon as upstream HEADERS arrive
+/// (so the CDN handshake + TTFB are off the start-up path). Bytes flow into a
+/// bounded channel; when it is full the task simply blocks, so the prefetch
+/// never races more than ~PREFETCH_CHUNKS ahead of the player and never
+/// competes with it for CDN bandwidth once the screen is consuming.
+const PREFETCH_CHUNKS: usize = 256; // reqwest chunks are ~8–16 KB → ~2–4 MB
 /// Unclaimed prefetches are dropped (upstream closed) after this long.
 const PREFETCH_TTL: Duration = Duration::from_secs(20);
 
@@ -65,17 +67,25 @@ pub struct Proxy {
     prefetched: Mutex<HashMap<String, Prefetched>>,
 }
 
-type ByteStream = futures_util::stream::BoxStream<'static, Result<bytes::Bytes, reqwest::Error>>;
+type Chunk = Result<bytes::Bytes, reqwest::Error>;
 
-/// A `GET bytes=0-` answered by upstream, with the first chunks already
-/// pulled into memory and the rest of the body still attached.
+/// A `GET bytes=0-` answered by upstream; the body is still being pulled by
+/// the prefetch task into `rx` (bounded). Whoever claims it owns the stream.
 struct Prefetched {
     status: StatusCode,
     headers: HeaderMap,
-    final_url: String,
-    head: Vec<bytes::Bytes>,
-    rest: ByteStream,
+    rx: tokio::sync::mpsc::Receiver<Chunk>,
+    buffered: Arc<std::sync::atomic::AtomicUsize>,
     started: std::time::Instant,
+}
+
+/// mpsc receiver as a Stream (avoids pulling in tokio-stream).
+struct RecvStream(tokio::sync::mpsc::Receiver<Chunk>);
+impl futures_util::Stream for RecvStream {
+    type Item = Chunk;
+    fn poll_next(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Chunk>> {
+        self.0.poll_recv(cx)
+    }
 }
 
 impl Proxy {
@@ -186,27 +196,30 @@ impl Proxy {
             if status.as_u16() >= 400 || is_playlist(&final_url, up.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok())) {
                 return; // let the real request see the error / playlist path
             }
-            let headers = up.headers().clone();
-            let mut rest: ByteStream = up.bytes_stream().boxed();
-            let mut head = vec![];
-            let mut n = 0usize;
-            while n < PREFETCH_BYTES {
-                match rest.next().await {
-                    Some(Ok(b)) => {
-                        n += b.len();
-                        head.push(b);
-                    }
-                    Some(Err(_)) | None => break,
-                }
-            }
             if me.verbose {
-                crate::logln!("[proxy] prefetch {} -> {} {}KB in {}ms", id, status.as_u16(), n / 1024, t0.elapsed().as_millis());
+                crate::logln!("[proxy] prefetch {} headers -> {} ttfb={}ms", id, status.as_u16(), t0.elapsed().as_millis());
             }
-            me.prefetched.lock().unwrap().insert(id.clone(), Prefetched { status, headers, final_url, head, rest, started: t0 });
+            let (tx, rx) = tokio::sync::mpsc::channel::<Chunk>(PREFETCH_CHUNKS);
+            let buffered = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            me.prefetched.lock().unwrap().insert(id.clone(), Prefetched { status, headers: up.headers().clone(), rx, buffered: buffered.clone(), started: t0 });
             // Expire if nobody claims it (screen never asked / asked with another Range).
-            tokio::time::sleep(PREFETCH_TTL).await;
-            if me.prefetched.lock().unwrap().remove(&id).is_some() && me.verbose {
-                crate::logln!("[proxy] prefetch {} expired unclaimed", id);
+            let me2 = me.clone();
+            let id2 = id.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(PREFETCH_TTL).await;
+                if me2.prefetched.lock().unwrap().remove(&id2).is_some() && me2.verbose {
+                    crate::logln!("[proxy] prefetch {} expired unclaimed", id2);
+                }
+            });
+            // Pump: blocks when the channel is full; ends when upstream ends or
+            // the receiver is gone (expired, cleared, or client disconnected).
+            let mut body = up.bytes_stream();
+            while let Some(chunk) = body.next().await {
+                let n = chunk.as_ref().map(|b| b.len()).unwrap_or(0);
+                if tx.send(chunk).await.is_err() {
+                    break;
+                }
+                buffered.fetch_add(n, std::sync::atomic::Ordering::Relaxed);
             }
         });
     }
@@ -377,9 +390,9 @@ impl Proxy {
     /// 200 with the full length (the prefetch asked for `bytes=0-`, which a
     /// 206 `Content-Range: bytes 0-N/N+1` describes exactly).
     fn serve_prefetched(&self, id: &str, pf: Prefetched, no_range: bool) -> Response<Body> {
-        let buffered: usize = pf.head.iter().map(|b| b.len()).sum();
         if self.verbose {
-            crate::logln!("[proxy] GET {} range=bytes=0- -> {} from prefetch ({}KB buffered, age {}ms)", id, pf.status.as_u16(), buffered / 1024, pf.started.elapsed().as_millis());
+            let pumped = pf.buffered.load(std::sync::atomic::Ordering::Relaxed);
+            crate::logln!("[proxy] GET {} range=bytes=0- -> {} from prefetch ({}KB already pulled, {} chunks waiting, age {}ms)", id, pf.status.as_u16(), pumped / 1024, pf.rx.len(), pf.started.elapsed().as_millis());
         }
         let mut status = pf.status;
         let mut out = shape_headers(&pf.headers, status);
@@ -393,10 +406,8 @@ impl Proxy {
         if !out.contains_key(header::CONTENT_TYPE) {
             out.insert(header::CONTENT_TYPE, HeaderValue::from_static("video/mp4"));
         }
-        let _ = pf.final_url;
         let verbose = self.verbose;
-        let head = futures_util::stream::iter(pf.head.into_iter().map(Ok::<_, std::io::Error>));
-        let rest = pf.rest.map(move |r| {
+        let stream = RecvStream(pf.rx).map(move |r| {
             r.map_err(|e| {
                 if verbose {
                     crate::logln!("[proxy] upstream stream error {}", e);
@@ -404,7 +415,7 @@ impl Proxy {
                 std::io::Error::other(e)
             })
         });
-        let stream = StreamAccount { inner: head.chain(rest), bytes: 0, start: std::time::Instant::now(), id: id.to_string(), verbose };
+        let stream = StreamAccount { inner: stream, bytes: 0, start: std::time::Instant::now(), id: id.to_string(), verbose };
         respond(status, out, Body::from_stream(stream))
     }
 }

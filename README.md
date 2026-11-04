@@ -63,7 +63,8 @@ dead-subscriber eviction after 3 failed deliveries; SSDP alive/byebye/M-SEARCH
 with MX spreading; media proxy (≤5 redirects, UA/Referer, Range and If-Range
 both ways, hop-by-hop header filtering, HLS segment and `URI=` rewriting,
 HEAD); **prefetch**: on SetAVTransportURI the server opens the upstream
-connection immediately and buffers the first 2 MB, so the screen's first
+connection immediately and registers it as soon as upstream headers arrive (the
+body keeps streaming into a bounded buffer), so the screen's first
 `bytes=0-` request (which arrives ~1.3 s later on webOS) is answered from
 memory and continues on the same upstream stream — removes the CDN TTFB from
 the start-up path; multi-screen channel (a live TV always wins over browser tabs, mid-clip

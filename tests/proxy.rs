@@ -226,3 +226,44 @@ async fn set_uri_triggers_prefetch() {
     assert_eq!(s.len(), 1, "upstream contacted before any screen asked");
     assert_eq!(s[0].1.get("range").map(String::as_str), Some("bytes=0-"));
 }
+
+#[tokio::test]
+async fn prefetch_is_claimable_as_soon_as_headers_arrive_even_if_body_is_slow() {
+    use std::time::Duration;
+    use tokio::io::AsyncWriteExt;
+    // Slow CDN: headers at once, then 10 × 100 KB with 200 ms gaps (≈ 2 s body).
+    let hits = Arc::new(Mutex::new(0usize));
+    let h2 = hits.clone();
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let slow = format!("http://{}", l.local_addr().unwrap());
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut s, _)) = l.accept().await else { break };
+            *h2.lock().unwrap() += 1;
+            tokio::spawn(async move {
+                let mut buf = [0u8; 2048];
+                let _ = tokio::io::AsyncReadExt::read(&mut s, &mut buf).await;
+                let _ = s.write_all(b"HTTP/1.1 206 Partial\r\nContent-Type: video/mp4\r\nContent-Range: bytes 0-1023999/1024000\r\nContent-Length: 1024000\r\nConnection: close\r\n\r\n").await;
+                for _ in 0..10 {
+                    if s.write_all(&[9u8; 102400]).await.is_err() {
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+                let _ = s.shutdown().await;
+            });
+        }
+    });
+    let (fb, app) = front("always").await;
+    let id = app.proxy.register(&format!("{slow}/v"));
+    app.proxy.prefetch(&format!("{fb}{id}"));
+    // Screen asks 300 ms later: headers are in, body is maybe 15 % done.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let t0 = std::time::Instant::now();
+    let r = req(&fb, "GET", &id, &[("Range", "bytes=0-")], None).await;
+    assert_eq!(r.status, 206);
+    assert_eq!(r.body.len(), 1_024_000);
+    assert!(r.body.iter().all(|b| *b == 9));
+    assert_eq!(*hits.lock().unwrap(), 1, "served from the in-flight prefetch, no second upstream connection");
+    assert!(t0.elapsed() < Duration::from_millis(2500), "did not restart the download: {:?}", t0.elapsed());
+}
