@@ -1,6 +1,6 @@
 [package]
 name = "webos-cast-receiver"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "DLNA MediaRenderer that relays casts (Douyin TV button etc.) to an LG webOS TV app — Rust port"
 license = "MIT"
@@ -33,4 +33,6 @@ opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
-panic = "abort"
+# Keep unwinding: a panic inside one request task must not take down SSDP,
+# GENA and the other connections (tokio isolates panics per task).
+panic = "unwind"
