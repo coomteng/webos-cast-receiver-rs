@@ -44,7 +44,8 @@ Environment (identical to the Node version): `FRIENDLY_NAME` (default
 `客厅电视`), `PORT` (8790), `BIND_ADDR` (pin the LAN interface on multi-NIC
 hosts; also the advertised IP), `ADVERTISE_HOST`, `PROXY_MODE` = `always` |
 `https-only` | `off`, `PROXY_UA`, `DATA_DIR` (persists the device UUID),
-`TV_TIMEOUT_MS` (12000), `UUID`, `MANUFACTURER`, `MODEL_NAME`, `VERBOSE=1`.
+`TV_TIMEOUT_MS` (12000), `UUID`, `MANUFACTURER`, `MODEL_NAME`, `VERBOSE=1`
+(per-request proxy timing lines: TTFB, bytes, rate, prefetch hits).
 
 Docker: `compose.portainer.yml` — **must** use `network_mode: host`
 (multicast). The image build clones the Node repo to pick up `app/` and
@@ -61,7 +62,11 @@ GENA SUBSCRIBE/renew/UNSUBSCRIBE with 200 ms-moderated `LastChange` NOTIFY and
 dead-subscriber eviction after 3 failed deliveries; SSDP alive/byebye/M-SEARCH
 with MX spreading; media proxy (≤5 redirects, UA/Referer, Range and If-Range
 both ways, hop-by-hop header filtering, HLS segment and `URI=` rewriting,
-HEAD); multi-screen channel (a live TV always wins over browser tabs, mid-clip
+HEAD); **prefetch**: on SetAVTransportURI the server opens the upstream
+connection immediately and buffers the first 2 MB, so the screen's first
+`bytes=0-` request (which arrives ~1.3 s later on webOS) is answered from
+memory and continues on the same upstream stream — removes the CDN TTFB from
+the start-up path; multi-screen channel (a live TV always wins over browser tabs, mid-clip
 handover with `startAt`, 12 s offline → UPnP 701).
 
 Behavioural details carried over from the Node version's real-TV debugging:

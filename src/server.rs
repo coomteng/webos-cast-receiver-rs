@@ -68,7 +68,16 @@ pub fn build(cfg: Config) -> (Shared, Router) {
         Arc::new(TvScreen(tv.clone())),
         Box::new(move |uri| {
             let p = p2.register(uri);
-            if p.starts_with('/') { format!("{base}{p}") } else { p }
+            // A new clip supersedes any pending prefetch; warm this one up
+            // now, the screen's first request lands ~1 s from here.
+            p2.clear_prefetch();
+            if p.starts_with('/') {
+                let full = format!("{base}{p}");
+                p2.prefetch(&full);
+                full
+            } else {
+                p
+            }
         }),
         now.clone(),
         ev_tx,

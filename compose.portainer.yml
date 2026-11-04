@@ -27,4 +27,6 @@ services:
       # always | https-only | off  — relay media through the server (default: always)
       PROXY_MODE: ${PROXY_MODE:-always}
       TZ: Europe/Zurich
+      # 1 = per-request proxy/GENA/screen logs (timing lines for /proxy)
+      VERBOSE: ${VERBOSE:-0}
     # scratch image has no shell/wget: probe http://<host>:8790/healthz from outside.

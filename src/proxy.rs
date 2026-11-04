@@ -11,13 +11,20 @@ use axum::http::{header, HeaderMap, HeaderName, HeaderValue, Method, Response, S
 use futures_util::StreamExt;
 use rand::Rng;
 use regex::Regex;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use url::Url;
 
 const MAX_REDIRECTS: usize = 5;
 const MAX_ENTRIES: usize = 2000;
+/// Prefetch: bytes buffered ahead of the screen's first request. The TV asks
+/// ~1.3 s after `load`; by then the CDN handshake + TTFB are done and the
+/// first chunk is in memory. Beyond this the prefetch task pauses and lets
+/// the real consumer pull (it does not race ahead of the player).
+const PREFETCH_BYTES: usize = 2 * 1024 * 1024;
+/// Unclaimed prefetches are dropped (upstream closed) after this long.
+const PREFETCH_TTL: Duration = Duration::from_secs(20);
 
 fn hop_headers() -> &'static HashSet<&'static str> {
     static H: OnceLock<HashSet<&'static str>> = OnceLock::new();
@@ -52,8 +59,23 @@ pub struct Proxy {
     verbose: bool,
     client: reqwest::Client,
     // Insertion-ordered so the oldest entry is evicted first.
-    entries: Mutex<(VecDeque<String>, std::collections::HashMap<String, Entry>)>,
+    entries: Mutex<(VecDeque<String>, HashMap<String, Entry>)>,
     counter: Mutex<u64>,
+    // id -> prefetched `bytes=0-` response, claimed by the first full GET.
+    prefetched: Mutex<HashMap<String, Prefetched>>,
+}
+
+type ByteStream = futures_util::stream::BoxStream<'static, Result<bytes::Bytes, reqwest::Error>>;
+
+/// A `GET bytes=0-` answered by upstream, with the first chunks already
+/// pulled into memory and the rest of the body still attached.
+struct Prefetched {
+    status: StatusCode,
+    headers: HeaderMap,
+    final_url: String,
+    head: Vec<bytes::Bytes>,
+    rest: ByteStream,
+    started: std::time::Instant,
 }
 
 impl Proxy {
@@ -68,7 +90,7 @@ impl Proxy {
             .no_proxy()
             .build()
             .expect("reqwest client");
-        Arc::new(Proxy { mode, user_agent: user_agent.to_string(), verbose, client, entries: Mutex::new(Default::default()), counter: Mutex::new(0) })
+        Arc::new(Proxy { mode, user_agent: user_agent.to_string(), verbose, client, entries: Mutex::new(Default::default()), counter: Mutex::new(0), prefetched: Mutex::new(HashMap::new()) })
     }
 
     pub fn register(&self, url: &str) -> String {
@@ -138,6 +160,66 @@ impl Proxy {
         Err("too many redirects".into())
     }
 
+    /// Start fetching `bytes=0-` for a registered id right now, so the
+    /// screen's first request is served from memory. Call right after
+    /// `register` for the clip that is about to be loaded. No-op for
+    /// non-proxied URLs, HLS playlists are not prefetched (they are rewritten
+    /// per request).
+    pub fn prefetch(self: &Arc<Self>, playable: &str) {
+        let Some(id) = playable.rsplit_once("/proxy/").map(|(_, id)| id.to_string()) else { return };
+        let Some(entry) = self.lookup(&id) else { return };
+        if is_playlist(&entry.url, None) {
+            return;
+        }
+        let me = self.clone();
+        tokio::spawn(async move {
+            let t0 = std::time::Instant::now();
+            let mut fwd = HeaderMap::new();
+            fwd.insert(header::RANGE, HeaderValue::from_static("bytes=0-"));
+            let Ok((up, final_url)) = me.fetch_upstream(&entry.url, Method::GET, &fwd, entry.referer.as_deref()).await else {
+                if me.verbose {
+                    crate::logln!("[proxy] prefetch {} failed", id);
+                }
+                return;
+            };
+            let status = up.status();
+            if status.as_u16() >= 400 || is_playlist(&final_url, up.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok())) {
+                return; // let the real request see the error / playlist path
+            }
+            let headers = up.headers().clone();
+            let mut rest: ByteStream = up.bytes_stream().boxed();
+            let mut head = vec![];
+            let mut n = 0usize;
+            while n < PREFETCH_BYTES {
+                match rest.next().await {
+                    Some(Ok(b)) => {
+                        n += b.len();
+                        head.push(b);
+                    }
+                    Some(Err(_)) | None => break,
+                }
+            }
+            if me.verbose {
+                crate::logln!("[proxy] prefetch {} -> {} {}KB in {}ms", id, status.as_u16(), n / 1024, t0.elapsed().as_millis());
+            }
+            me.prefetched.lock().unwrap().insert(id.clone(), Prefetched { status, headers, final_url, head, rest, started: t0 });
+            // Expire if nobody claims it (screen never asked / asked with another Range).
+            tokio::time::sleep(PREFETCH_TTL).await;
+            if me.prefetched.lock().unwrap().remove(&id).is_some() && me.verbose {
+                crate::logln!("[proxy] prefetch {} expired unclaimed", id);
+            }
+        });
+    }
+
+    /// Drop every pending prefetch (new clip supersedes the old one).
+    pub fn clear_prefetch(&self) {
+        self.prefetched.lock().unwrap().clear();
+    }
+
+    fn take_prefetched(&self, id: &str) -> Option<Prefetched> {
+        self.prefetched.lock().unwrap().remove(id)
+    }
+
     fn rewrite_playlist(&self, text: &str, base: &str, referer: Option<&str>) -> String {
         static URI: OnceLock<Regex> = OnceLock::new();
         let uri_re = URI.get_or_init(|| Regex::new(r#"URI="([^"]+)""#).unwrap());
@@ -176,6 +258,14 @@ impl Proxy {
                 fwd.insert(k, v.clone());
             }
         }
+        let t0 = std::time::Instant::now();
+        let range = headers.get(header::RANGE).and_then(|v| v.to_str().ok()).unwrap_or("-").to_string();
+        let from_start = range == "-" || range == "bytes=0-";
+        if method == Method::GET && from_start {
+            if let Some(pf) = self.take_prefetched(id) {
+                return self.serve_prefetched(id, pf, range == "-");
+            }
+        }
         let (up, final_url) = match self.fetch_upstream(&entry.url, method.clone(), &fwd, entry.referer.as_deref()).await {
             Ok(x) => x,
             Err(e) => {
@@ -186,19 +276,16 @@ impl Proxy {
             }
         };
         let status = up.status();
-        let mut out = HeaderMap::new();
-        for (k, v) in up.headers() {
-            if hop_headers().contains(k.as_str()) {
-                continue;
-            }
-            out.append(k.clone(), v.clone());
+        let ttfb = t0.elapsed();
+        if self.verbose {
+            crate::logln!(
+                "[proxy] {} {} range={} -> {} ttfb={}ms len={} cr={}",
+                method, id, range, status.as_u16(), ttfb.as_millis(),
+                up.headers().get(header::CONTENT_LENGTH).and_then(|v| v.to_str().ok()).unwrap_or("-"),
+                up.headers().get(header::CONTENT_RANGE).and_then(|v| v.to_str().ok()).unwrap_or("-")
+            );
         }
-        out.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
-        out.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-        // LG/webOS players seek by Range; advertise it when upstream didn't.
-        if !out.contains_key(header::ACCEPT_RANGES) && status == StatusCode::OK {
-            out.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
-        }
+        let mut out = shape_headers(up.headers(), status);
         let ct = up.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).map(str::to_string);
         if status.as_u16() < 400 && method == Method::GET && is_playlist(&final_url, ct.as_deref()) {
             return match up.bytes().await {
@@ -222,6 +309,7 @@ impl Proxy {
         // (the client sees a truncated body / reset), it never touches the
         // already-sent headers and never takes the process down.
         let verbose = self.verbose;
+        let id_owned = id.to_string();
         let stream = up.bytes_stream().map(move |r| {
             r.map_err(|e| {
                 if verbose {
@@ -230,6 +318,93 @@ impl Proxy {
                 std::io::Error::other(e)
             })
         });
+        let stream = StreamAccount { inner: stream, bytes: 0, start: t0, id: id_owned, verbose };
+        respond(status, out, Body::from_stream(stream))
+    }
+}
+
+/// Counts streamed bytes and logs one line when the body ends (upstream EOF,
+/// upstream error, or the client going away and dropping the body).
+struct StreamAccount<S> {
+    inner: S,
+    bytes: u64,
+    start: std::time::Instant,
+    id: String,
+    verbose: bool,
+}
+
+impl<S: futures_util::Stream<Item = Result<bytes::Bytes, std::io::Error>> + Unpin> futures_util::Stream for StreamAccount<S> {
+    type Item = Result<bytes::Bytes, std::io::Error>;
+    fn poll_next(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
+        let r = std::pin::Pin::new(&mut self.inner).poll_next(cx);
+        if let std::task::Poll::Ready(Some(Ok(b))) = &r {
+            self.bytes += b.len() as u64;
+        }
+        r
+    }
+}
+
+impl<S> Drop for StreamAccount<S> {
+    fn drop(&mut self) {
+        if self.verbose {
+            let ms = self.start.elapsed().as_millis().max(1) as u64;
+            crate::logln!("[proxy] end {} bytes={} dur={}ms rate={}KB/s", self.id, self.bytes, ms, self.bytes * 1000 / ms / 1024);
+        }
+    }
+}
+
+/// Upstream headers -> what we send the screen.
+fn shape_headers(up: &HeaderMap, status: StatusCode) -> HeaderMap {
+    let mut out = HeaderMap::new();
+    for (k, v) in up {
+        if hop_headers().contains(k.as_str()) {
+            continue;
+        }
+        out.append(k.clone(), v.clone());
+    }
+    out.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
+    out.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    // LG/webOS players seek by Range; advertise it when upstream didn't.
+    if !out.contains_key(header::ACCEPT_RANGES) && status == StatusCode::OK {
+        out.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    }
+    out
+}
+
+impl Proxy {
+    /// Answer a `GET bytes=0-` from the prefetched head, then continue on the
+    /// same upstream stream. A request without any Range header gets a plain
+    /// 200 with the full length (the prefetch asked for `bytes=0-`, which a
+    /// 206 `Content-Range: bytes 0-N/N+1` describes exactly).
+    fn serve_prefetched(&self, id: &str, pf: Prefetched, no_range: bool) -> Response<Body> {
+        let buffered: usize = pf.head.iter().map(|b| b.len()).sum();
+        if self.verbose {
+            crate::logln!("[proxy] GET {} range=bytes=0- -> {} from prefetch ({}KB buffered, age {}ms)", id, pf.status.as_u16(), buffered / 1024, pf.started.elapsed().as_millis());
+        }
+        let mut status = pf.status;
+        let mut out = shape_headers(&pf.headers, status);
+        if no_range && status == StatusCode::PARTIAL_CONTENT {
+            out.remove(header::CONTENT_RANGE);
+            status = StatusCode::OK;
+            if !out.contains_key(header::ACCEPT_RANGES) {
+                out.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+            }
+        }
+        if !out.contains_key(header::CONTENT_TYPE) {
+            out.insert(header::CONTENT_TYPE, HeaderValue::from_static("video/mp4"));
+        }
+        let _ = pf.final_url;
+        let verbose = self.verbose;
+        let head = futures_util::stream::iter(pf.head.into_iter().map(Ok::<_, std::io::Error>));
+        let rest = pf.rest.map(move |r| {
+            r.map_err(|e| {
+                if verbose {
+                    crate::logln!("[proxy] upstream stream error {}", e);
+                }
+                std::io::Error::other(e)
+            })
+        });
+        let stream = StreamAccount { inner: head.chain(rest), bytes: 0, start: std::time::Instant::now(), id: id.to_string(), verbose };
         respond(status, out, Body::from_stream(stream))
     }
 }

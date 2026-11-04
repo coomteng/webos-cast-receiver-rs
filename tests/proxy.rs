@@ -147,3 +147,82 @@ async fn upstream_reset_mid_body_does_not_kill_server() {
     assert_eq!(ok.status, 206);
     assert_eq!(ok.body.len(), 10);
 }
+
+#[tokio::test]
+async fn prefetch_serves_first_get_from_one_upstream_request() {
+    use std::time::Duration;
+    let seen: Seen = Arc::new(Mutex::new(vec![]));
+    let cdn = cdn(seen.clone()).await;
+    let (fb, app) = front("always").await;
+    let p = app.proxy.clone();
+
+    // register + prefetch (what set_uri does), give the task time to land
+    let id = p.register(&format!("{cdn}/redir"));
+    p.prefetch(&format!("{fb}{id}"));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(seen.lock().unwrap().len(), 2, "prefetch followed the redirect: /redir + /video");
+
+    // the screen's first request: served from the prefetch, no new upstream hit
+    let r = req(&fb, "GET", &id, &[("Range", "bytes=0-")], None).await;
+    assert_eq!(r.status, 206);
+    assert_eq!(r.header("content-range"), Some("bytes 0-999/1000"));
+    assert_eq!(r.body.len(), 1000);
+    assert!(r.body.iter().all(|b| *b == 7));
+    assert_eq!(seen.lock().unwrap().len(), 2, "no extra upstream request");
+
+    // second identical request: prefetch consumed, goes upstream again
+    let r = req(&fb, "GET", &id, &[("Range", "bytes=0-")], None).await;
+    assert_eq!(r.status, 206);
+    assert_eq!(seen.lock().unwrap().len(), 4, "redirect + video again");
+
+    // a prefetched clip asked without Range -> plain 200, full body
+    let id2 = p.register(&format!("{cdn}/video"));
+    p.prefetch(&format!("{fb}{id2}"));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let r = get(&fb, &id2).await;
+    assert_eq!(r.status, 200);
+    assert_eq!(r.header("content-range"), None);
+    assert_eq!(r.header("accept-ranges"), Some("bytes"));
+    assert_eq!(r.body.len(), 1000);
+
+    // a mid-file Range bypasses the prefetch (and leaves it for a later bytes=0-)
+    let id3 = p.register(&format!("{cdn}/video"));
+    p.prefetch(&format!("{fb}{id3}"));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let n = seen.lock().unwrap().len();
+    let r = req(&fb, "GET", &id3, &[("Range", "bytes=500-599")], None).await;
+    assert_eq!(r.status, 206);
+    assert_eq!(r.body.len(), 100);
+    assert_eq!(seen.lock().unwrap().len(), n + 1);
+    let r = req(&fb, "GET", &id3, &[("Range", "bytes=0-")], None).await;
+    assert_eq!(r.body.len(), 1000);
+    assert_eq!(seen.lock().unwrap().len(), n + 1, "bytes=0- still came from the prefetch");
+
+    // errors are not prefetched: the real request sees the 403
+    let id4 = p.register(&format!("{cdn}/fail"));
+    p.prefetch(&format!("{fb}{id4}"));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(get(&fb, &id4).await.status, 403);
+
+    // clear_prefetch drops pending ones (new clip supersedes)
+    let id5 = p.register(&format!("{cdn}/video"));
+    p.prefetch(&format!("{fb}{id5}"));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    p.clear_prefetch();
+    let n = seen.lock().unwrap().len();
+    assert_eq!(req(&fb, "GET", &id5, &[("Range", "bytes=0-")], None).await.body.len(), 1000);
+    assert_eq!(seen.lock().unwrap().len(), n + 1, "went upstream after clear");
+}
+
+#[tokio::test]
+async fn set_uri_triggers_prefetch() {
+    use std::time::Duration;
+    let seen: Seen = Arc::new(Mutex::new(vec![]));
+    let cdn = cdn(seen.clone()).await;
+    let (fb, _app) = front("always").await;
+    soap(&fb, "avt", "SetAVTransportURI", &format!("<CurrentURI>{cdn}/video</CurrentURI><CurrentURIMetaData></CurrentURIMetaData>")).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let s = seen.lock().unwrap();
+    assert_eq!(s.len(), 1, "upstream contacted before any screen asked");
+    assert_eq!(s[0].1.get("range").map(String::as_str), Some("bytes=0-"));
+}
