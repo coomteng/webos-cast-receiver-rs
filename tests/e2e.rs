@@ -13,14 +13,19 @@ use webos_cast_receiver::server::build;
 
 async fn start(tv_timeout_ms: &str) -> String {
     let tmp = tempfile::tempdir().unwrap();
-    let app_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../webos-cast-receiver/app");
+    // Minimal stand-in for the TV app (the real one lives in the Node repo):
+    // enough to prove routing, MIME and traversal protection.
+    let app_dir = tmp.path().join("app");
+    std::fs::create_dir_all(app_dir.join("js")).unwrap();
+    std::fs::write(app_dir.join("index.html"), "<!DOCTYPE html><video id=\"video\"></video>").unwrap();
+    std::fs::write(app_dir.join("js/app.js"), "/* app */").unwrap();
     let env: HashMap<String, String> = [
         ("DATA_DIR", tmp.path().to_str().unwrap()),
         ("PORT", "0"),
         ("ADVERTISE_HOST", "127.0.0.1"),
         ("PROXY_MODE", "off"),
         ("TV_TIMEOUT_MS", tv_timeout_ms),
-        ("APP_DIR", app_dir),
+        ("APP_DIR", app_dir.to_str().unwrap()),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -73,7 +78,10 @@ async fn descriptions_and_basics() {
     let r = get(&base, "/").await;
     assert_eq!(r.status, 200, "{}", r.text());
     assert!(r.text().contains("<video"));
-    assert_eq!(get(&base, "/js/app.js").await.status, 200);
+    let js = get(&base, "/js/app.js").await;
+    assert_eq!(js.status, 200);
+    assert_eq!(js.header("content-type"), Some("application/javascript"));
+    assert_eq!(get(&base, "/tv/js/app.js").await.status, 200);
     assert_eq!(get(&base, "/tv/../Cargo.toml").await.status, 404);
     assert_eq!(get(&base, "/tv/%2e%2e/Cargo.toml").await.status, 404);
 }
