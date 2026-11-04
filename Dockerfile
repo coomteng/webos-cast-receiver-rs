@@ -13,7 +13,7 @@ RUN cargo build --release --locked
 # source of truth); fetch them from GitHub at a pinned ref.
 FROM alpine:3 AS assets
 ARG APP_REPO=https://github.com/coomteng/webos-cast-receiver
-ARG APP_REF=main
+ARG APP_REF=v0.2.3
 RUN apk add --no-cache git && git clone --depth 1 --branch "$APP_REF" "$APP_REPO" /app-src
 
 # Stage 3: scratch image: binary + static assets, nothing else.

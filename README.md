@@ -33,7 +33,7 @@ after a full cast through the proxy (idle ~5 MB).
 
 ```sh
 cargo run --release                        # http://<lan-ip>:8790, advertises on SSDP
-cargo test                                 # 47 tests: unit + HTTP end-to-end + proxy against a fake CDN
+cargo test                                 # 50 tests: unit + HTTP end-to-end + proxy against a fake CDN
 ```
 
 Static assets: by default the binary looks for `app/` and `sim/` next to the
@@ -49,7 +49,7 @@ hosts; also the advertised IP), `ADVERTISE_HOST`, `PROXY_MODE` = `always` |
 
 Docker: `compose.portainer.yml` — **must** use `network_mode: host`
 (multicast). The image build clones the Node repo to pick up `app/` and
-`sim/` (pin with `--build-arg APP_REF=<tag>`).
+`sim/` at the tag in `ARG APP_REF` (currently `v0.2.3`); bump it when the TV app changes.
 
 ## What is implemented
 
