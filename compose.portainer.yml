@@ -1,0 +1,30 @@
+# Portainer stack: cast-receiver-rs (host network, :8790).
+#
+# Portainer → Stacks → Add stack → Repository
+#   Compose path : compose.portainer.yml
+#   Env vars     : FRIENDLY_NAME / BIND_ADDR / PROXY_MODE (defaults below)
+# Before first deploy on the Docker host:  mkdir -p /srv/cast-receiver/data
+# The Node stack `cast-receiver` listens on the same port: stop it first, or
+# run this one on another PORT while evaluating (SSDP 1900 is shared via
+# SO_REUSEPORT, so both can be discoverable at once).
+services:
+  cast-receiver-rs:
+    build: .
+    pull_policy: build
+    image: webos-cast-receiver-rs:local
+    container_name: cast-receiver-rs
+    restart: unless-stopped
+    # MUST be host networking: SSDP (UDP 1900 multicast) does not cross the
+    # Docker bridge; the phone would never see the device.
+    network_mode: host
+    volumes:
+      - "${CAST_DATA_DIR:-/srv/cast-receiver/data}:/data"
+    environment:
+      FRIENDLY_NAME: ${FRIENDLY_NAME:-客厅电视}
+      PORT: ${PORT:-8790}
+      # Pin the LAN interface on multi-NIC hosts (also the IP advertised to phones/TV):
+      BIND_ADDR: ${BIND_ADDR:-}
+      # always | https-only | off  — relay media through the server (default: always)
+      PROXY_MODE: ${PROXY_MODE:-always}
+      TZ: Europe/Zurich
+    # scratch image has no shell/wget: probe http://<host>:8790/healthz from outside.
