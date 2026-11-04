@@ -24,6 +24,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: musl C toolchain (ring has a little C)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+
       - name: Rust (musl)
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -37,6 +40,8 @@ jobs:
         run: cargo test --locked
 
       - name: Build static binary
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
         run: |
           cargo build --release --locked --target x86_64-unknown-linux-musl
           mkdir -p out && cp target/x86_64-unknown-linux-musl/release/webos-cast-receiver out/
