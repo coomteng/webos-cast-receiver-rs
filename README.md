@@ -47,9 +47,11 @@ hosts; also the advertised IP), `ADVERTISE_HOST`, `PROXY_MODE` = `always` |
 `TV_TIMEOUT_MS` (12000), `UUID`, `MANUFACTURER`, `MODEL_NAME`, `VERBOSE=1`
 (per-request proxy timing lines: TTFB, bytes, rate, prefetch hits).
 
-Docker: `compose.portainer.yml` — **must** use `network_mode: host`
-(multicast). The image build clones the Node repo to pick up `app/` and
-`sim/` at the tag in `ARG APP_REF` (currently `v0.2.3`); bump it when the TV app changes.
+Docker: `compose.portainer.yml` pulls `ghcr.io/coomteng/webos-cast-receiver-rs`
+(built by GitHub Actions on every push/tag; `TAG` env selects a version,
+default `latest`) — **must** use `network_mode: host` (multicast). `Dockerfile`
+builds the same image locally. Both clone the Node repo for `app/` and `sim/`
+at `ARG APP_REF` (currently `v0.2.3`); bump it when the TV app changes.
 
 ## What is implemented
 

@@ -1,0 +1,15 @@
+# CI variant: the binary is built by the workflow (musl, static), this only
+# assembles the scratch image. Same layout/env as Dockerfile.
+FROM alpine:3 AS assets
+ARG APP_REPO=https://github.com/coomteng/webos-cast-receiver
+ARG APP_REF=v0.2.3
+RUN apk add --no-cache git && git clone --depth 1 --branch "$APP_REF" "$APP_REPO" /app-src
+
+FROM scratch
+COPY out/webos-cast-receiver /webos-cast-receiver
+COPY --from=assets /app-src/app /app
+COPY --from=assets /app-src/sim /sim
+VOLUME ["/data"]
+ENV DATA_DIR=/data APP_DIR=/app SIM_DIR=/sim PORT=8790
+EXPOSE 8790
+ENTRYPOINT ["/webos-cast-receiver"]

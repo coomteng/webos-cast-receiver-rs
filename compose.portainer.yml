@@ -1,17 +1,17 @@
 # Portainer stack: cast-receiver-rs (host network, :8790).
 #
+# Pulls the image GitHub Actions publishes to ghcr.io (public, no login).
 # Portainer → Stacks → Add stack → Repository
 #   Compose path : compose.portainer.yml
-#   Env vars     : FRIENDLY_NAME / BIND_ADDR / PROXY_MODE (defaults below)
+#   Env vars     : FRIENDLY_NAME / BIND_ADDR / PROXY_MODE / TAG (defaults below)
+# Update = "Pull and redeploy" (seconds). To build locally instead, see Dockerfile.
 # Before first deploy on the Docker host:  mkdir -p /srv/cast-receiver/data
 # The Node stack `cast-receiver` listens on the same port: stop it first, or
 # run this one on another PORT while evaluating (SSDP 1900 is shared via
 # SO_REUSEPORT, so both can be discoverable at once).
 services:
   cast-receiver-rs:
-    build: .
-    pull_policy: build
-    image: webos-cast-receiver-rs:local
+    image: ghcr.io/coomteng/webos-cast-receiver-rs:${TAG:-latest}
     container_name: cast-receiver-rs
     restart: unless-stopped
     # MUST be host networking: SSDP (UDP 1900 multicast) does not cross the
