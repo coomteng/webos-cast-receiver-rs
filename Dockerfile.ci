@@ -6,7 +6,10 @@ ARG APP_REF=v0.2.3
 RUN apk add --no-cache git && git clone --depth 1 --branch "$APP_REF" "$APP_REPO" /app-src
 
 FROM scratch
-COPY out/webos-cast-receiver /webos-cast-receiver
+# TARGETARCH is set by buildx per platform (amd64 / arm64); the workflow
+# places each native-built binary under out/<arch>/.
+ARG TARGETARCH
+COPY out/${TARGETARCH}/webos-cast-receiver /webos-cast-receiver
 COPY --from=assets /app-src/app /app
 COPY --from=assets /app-src/sim /sim
 VOLUME ["/data"]

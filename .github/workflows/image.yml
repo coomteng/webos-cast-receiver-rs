@@ -1,7 +1,7 @@
 # Build the static binary and the scratch image on GitHub, push to ghcr.io.
 # The Portainer stack only pulls: no Rust toolchain needed on the LAN box.
 #
-#   push to main      -> ghcr.io/coomteng/webos-cast-receiver-rs:latest, :sha-<short>
+#   push to main      -> ghcr.io/coomteng/webos-cast-receiver-rs:latest, :sha-<short>  (linux/amd64 + linux/arm64)
 #   tag v*            -> additionally :<version> and a GitHub Release with the raw binary
 name: image
 
@@ -19,8 +19,18 @@ env:
   IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
+  # One native runner per architecture: no QEMU, no cross toolchain.
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
@@ -30,11 +40,11 @@ jobs:
       - name: Rust (musl)
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-musl
+          targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: musl
+          key: musl-${{ matrix.arch }}
 
       - name: Test
         run: cargo test --locked
@@ -42,10 +52,34 @@ jobs:
       - name: Build static binary
         env:
           CC_x86_64_unknown_linux_musl: musl-gcc
+          CC_aarch64_unknown_linux_musl: musl-gcc
         run: |
-          cargo build --release --locked --target x86_64-unknown-linux-musl
-          mkdir -p out && cp target/x86_64-unknown-linux-musl/release/webos-cast-receiver out/
-          ls -la out/
+          cargo build --release --locked --target ${{ matrix.target }}
+          mkdir -p out/${{ matrix.arch }} && cp target/${{ matrix.target }}/release/webos-cast-receiver out/${{ matrix.arch }}/
+          ls -la out/${{ matrix.arch }}/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.arch }}
+          path: out/${{ matrix.arch }}/webos-cast-receiver
+          if-no-files-found: error
+
+  image:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*
+          path: out
+      # download-artifact puts each artifact in out/bin-<arch>/; Dockerfile.ci expects out/<arch>/
+      - run: |
+          for a in amd64 arm64; do mkdir -p out/$a && mv out/bin-$a/webos-cast-receiver out/$a/ && chmod +x out/$a/webos-cast-receiver; done
+          ls -laR out
+
+      - uses: docker/setup-buildx-action@v3
 
       - name: Login to ghcr.io
         uses: docker/login-action@v3
@@ -69,6 +103,7 @@ jobs:
         with:
           context: .
           file: Dockerfile.ci
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -77,5 +112,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: out/webos-cast-receiver
+          files: |
+            out/amd64/webos-cast-receiver
+            out/arm64/webos-cast-receiver
           generate_release_notes: true
