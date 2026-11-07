@@ -1447,7 +1447,7 @@ dependencies = [
 
 [[package]]
 name = "webos-cast-receiver"
-version = "0.2.1"
+version = "0.2.4"
 dependencies = [
  "axum",
  "bytes",

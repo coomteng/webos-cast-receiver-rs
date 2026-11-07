@@ -24,7 +24,7 @@ pub fn device_description(d: &DeviceIdentity) -> String {
 <deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType>\
 <friendlyName>{}</friendlyName>\
 <manufacturer>{}</manufacturer>\
-<manufacturerURL>https://github.com/coomteng/webos-cast-receiver</manufacturerURL>\
+<manufacturerURL>https://github.com/coomteng/webos-cast-receiver-rs</manufacturerURL>\
 <modelName>{}</modelName>\
 <modelDescription>DLNA renderer relaying to an LG webOS TV</modelDescription>\
 <modelNumber>1.0</modelNumber>\

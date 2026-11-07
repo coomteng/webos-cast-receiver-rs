@@ -1,0 +1,83 @@
+/* Cast receiver for LG webOS 4.x (Chrome 53): flexbox only, no CSS vars / grid / gap.
+   Palette shared with MoonTV: bg #0f1117, accent #fad778, text #e8e8ec, secondary #8f94a3. */
+html, body {
+  margin: 0; padding: 0; width: 1920px; height: 1080px; overflow: hidden;
+  background: #000; color: #e8e8ec;
+  font-family: "Noto Sans CJK SC", "Microsoft YaHei", "LG Display", sans-serif;
+  font-size: 28px;
+}
+* { box-sizing: border-box; -webkit-user-select: none; }
+.hidden { display: none !important; }
+
+#video { position: absolute; top: 0; left: 0; width: 1920px; height: 1080px; background: #000; }
+
+/* ------------------------------------------------------------ idle */
+#idle {
+  position: absolute; top: 0; left: 0; width: 1920px; height: 1080px;
+  background: #0f1117;
+  display: -webkit-flex; display: flex;
+  -webkit-align-items: center; align-items: center;
+  -webkit-justify-content: center; justify-content: center;
+}
+#idle .card {
+  width: 1100px; padding: 70px 90px; border-radius: 28px;
+  background: #161923; border: 2px solid #232736; text-align: center;
+}
+#idle .dot {
+  display: inline-block; width: 22px; height: 22px; border-radius: 11px; margin-bottom: 30px;
+  background: #e53935; box-shadow: 0 0 18px rgba(229,57,53,0.6);
+}
+#idle .dot.on { background: #43a047; box-shadow: 0 0 18px rgba(67,160,71,0.7); }
+#idle .name { font-size: 76px; font-weight: bold; color: #fad778; letter-spacing: 4px; }
+#idle .hint { font-size: 32px; color: #8f94a3; margin-top: 18px; }
+#idle .steps { margin-top: 50px; font-size: 30px; color: #b8bcc8; line-height: 1.9; }
+#idle .meta { margin-top: 40px; font-size: 22px; color: #5c6170; }
+#idle .foot { position: absolute; bottom: 40px; right: 60px; font-size: 22px; color: #5c6170; }
+
+/* ------------------------------------------------------------ loading */
+#loading {
+  position: absolute; top: 0; left: 0; width: 1920px; height: 1080px;
+  display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column;
+  -webkit-align-items: center; align-items: center; -webkit-justify-content: center; justify-content: center;
+  background: rgba(0,0,0,0.55);
+}
+#loading .spin {
+  width: 90px; height: 90px; border-radius: 45px;
+  border: 8px solid rgba(250,215,120,0.2); border-top-color: #fad778;
+  -webkit-animation: spin 0.9s linear infinite; animation: spin 0.9s linear infinite;
+}
+#loading .txt { margin-top: 30px; font-size: 30px; color: #d6d9e2; }
+@-webkit-keyframes spin { to { -webkit-transform: rotate(360deg); } }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ------------------------------------------------------------ OSD */
+#osd {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 220px; padding: 0 80px;
+  background: -webkit-linear-gradient(bottom, rgba(0,0,0,0.85), rgba(0,0,0,0));
+  display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column;
+  -webkit-justify-content: flex-end; justify-content: flex-end; padding-bottom: 50px;
+}
+#osd .title { font-size: 36px; color: #fff; margin-bottom: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#osd .bar { display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; }
+#osd .t { font-size: 28px; color: #d6d9e2; width: 120px; }
+#osd .t + .track { margin-left: 20px; }
+#osd .track { -webkit-flex: 1; flex: 1; height: 10px; border-radius: 5px; background: rgba(255,255,255,0.25); position: relative; margin-right: 20px; }
+#osd .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 5px; background: #fad778; }
+#osd .st { font-size: 26px; color: #fad778; width: 120px; text-align: right; }
+
+/* ------------------------------------------------------------ toast */
+#toast {
+  position: absolute; top: 60px; left: 50%; margin-left: -400px; width: 800px;
+  padding: 18px 30px; border-radius: 16px; text-align: center;
+  background: rgba(22,25,35,0.95); border: 2px solid #343947; color: #e8e8ec; font-size: 30px;
+}
+#toast.err { border-color: #e53935; color: #ff8a80; }
+
+/* ------------------------------------------------------------ unmute banner (browser screens) */
+#unmute {
+  position: absolute; top: 40px; left: 50%; margin-left: -520px; width: 1040px;
+  padding: 22px 30px; border-radius: 18px; text-align: center;
+  background: rgba(250,215,120,0.95); color: #1a1400; font-size: 34px; font-weight: bold;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5); cursor: pointer;
+}
+#unmute .ico { margin-right: 14px; }

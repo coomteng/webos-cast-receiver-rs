@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>投屏接收 — TV simulator</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a0b10; color: #c8ccd6; font: 14px/1.4 -apple-system, "Segoe UI", "Noto Sans", sans-serif; }
+  #wrap { display: flex; height: 100%; align-items: center; justify-content: center; gap: 28px; padding: 20px; box-sizing: border-box; }
+  #tv { position: relative; background: #000; border: 10px solid #1c1f29; border-radius: 14px; box-shadow: 0 30px 80px rgba(0,0,0,.7); flex: none; }
+  #tv iframe { width: 1920px; height: 1080px; border: 0; transform-origin: 0 0; display: block; background: #000; }
+  #remote { width: 200px; background: linear-gradient(#262a36, #171a23); border-radius: 100px 100px 60px 60px; padding: 24px 16px 28px; box-shadow: 0 20px 50px rgba(0,0,0,.6); user-select: none; flex: none; }
+  .row { display: flex; justify-content: center; gap: 10px; margin: 10px 0; }
+  button.k { all: unset; cursor: pointer; width: 44px; height: 44px; border-radius: 50%; background: #343947; color: #e8e8ec; text-align: center; line-height: 44px; font-size: 16px; box-shadow: 0 3px 0 #0e1016; }
+  button.k:active { transform: translateY(2px); background: #fad778; color: #111; }
+  button.k.wide { width: 60px; border-radius: 22px; font-size: 12px; }
+  .dpad { position: relative; width: 150px; height: 150px; margin: 12px auto; border-radius: 50%; background: #2c3140; }
+  .dpad button.k { position: absolute; width: 46px; height: 46px; line-height: 46px; background: transparent; box-shadow: none; font-size: 20px; }
+  .dpad .d-up { top: 4px; left: 52px; } .dpad .d-down { bottom: 4px; left: 52px; } .dpad .d-left { left: 4px; top: 52px; } .dpad .d-right { right: 4px; top: 52px; }
+  .dpad .ok { left: 45px; top: 45px; width: 60px !important; height: 60px !important; line-height: 60px !important; background: #fad778 !important; color: #111 !important; font-weight: 600; font-size: 14px; }
+  #side { width: 320px; flex: none; color: #8f94a3; font-size: 13px; }
+  #side h1 { font-size: 18px; color: #e8e8ec; margin: 0 0 6px; }
+  #side code { background: #1a1d28; padding: 1px 5px; border-radius: 4px; color: #c8ccd6; }
+  #side table { border-collapse: collapse; margin: 10px 0; }
+  #side td { padding: 2px 8px 2px 0; vertical-align: top; }
+  #side td:first-child { color: #fad778; white-space: nowrap; }
+  #status { margin-top: 10px; background: #0f1117; border: 1px solid #1f2330; border-radius: 6px; padding: 6px 8px; font: 12px/1.5 ui-monospace, Menlo, monospace; color: #9aa0ae; white-space: pre; height: 170px; overflow: auto; }
+  #side a { color: #7ec8ff; }
+  input[type=text] { width: 100%; box-sizing: border-box; background: #1a1d28; border: 1px solid #2a2e3b; color: #e8e8ec; padding: 5px; border-radius: 4px; }
+  button.b { background: #343947; color: #e8e8ec; border: 0; border-radius: 4px; padding: 5px 10px; cursor: pointer; margin-top: 6px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="side">
+    <h1>投屏接收 模拟器</h1>
+    <div>左边是电视（1920×1080 等比缩放，跑的就是 <code>app/</code>），右边是遥控器。点一下电视获得焦点。</div>
+    <table>
+      <tr><td>Enter / Space</td><td>播放 / 暂停</td></tr>
+      <tr><td>← →</td><td>±10 s</td></tr>
+      <tr><td>Esc</td><td>返回（停止 / 退出）</td></tr>
+    </table>
+    <div style="margin:8px 0;color:#fad778">声音：浏览器在你点过电视画面之前只允许静音自动播放。出现黄色横幅时<b>点一下电视画面</b>即可开声。</div>
+    <div>假手机：把一个视频 URL 推给接收端（走和抖音一样的 SOAP）：</div>
+    <input type="text" id="url" value="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4">
+    <button class="b" id="cast">SetAVTransportURI + Play</button>
+    <button class="b" id="pause">Pause</button>
+    <button class="b" id="play">Play</button>
+    <button class="b" id="stop">Stop</button>
+    <div id="status"></div>
+    <div style="margin-top:8px"><a href="/tv/" target="_blank">全屏打开 APP</a> · <a href="/status" target="_blank">/status</a> · <a href="/dlna/device.xml" target="_blank">device.xml</a></div>
+  </div>
+  <div id="tv"><iframe id="frame" src="/tv/"></iframe></div>
+  <div id="remote">
+    <div class="dpad">
+      <button class="k d-up" data-key="38">▲</button>
+      <button class="k d-left" data-key="37">◀</button>
+      <button class="k ok" data-key="13">OK</button>
+      <button class="k d-right" data-key="39">▶</button>
+      <button class="k d-down" data-key="40">▼</button>
+    </div>
+    <div class="row"><button class="k wide" data-key="461">BACK</button><button class="k wide" data-key="413">STOP</button></div>
+    <div class="row"><button class="k" data-key="412">⏪</button><button class="k" data-key="415">▶</button><button class="k" data-key="19">⏸</button><button class="k" data-key="417">⏩</button></div>
+  </div>
+</div>
+<script>
+(function () {
+  var frame = document.getElementById('frame'), tv = document.getElementById('tv');
+  function fit() {
+    var s = Math.min((window.innerWidth - 640) / 1920, (window.innerHeight - 80) / 1080, 1);
+    frame.style.transform = 'scale(' + s + ')';
+    tv.style.width = (1920 * s) + 'px'; tv.style.height = (1080 * s) + 'px';
+  }
+  window.addEventListener('resize', fit); fit();
+
+  function sendKey(code) {
+    var w = frame.contentWindow;
+    var ev = new w.KeyboardEvent('keydown', { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, 'keyCode', { get: function () { return code; } });
+    Object.defineProperty(ev, 'which', { get: function () { return code; } });
+    w.document.dispatchEvent(ev);
+  }
+  document.querySelectorAll('button.k').forEach(function (b) { b.addEventListener('click', function () { sendKey(+b.dataset.key); }); });
+  document.addEventListener('keydown', function (e) {
+    if (e.target.tagName === 'INPUT') return;
+    var map = { Escape: 461, Backspace: 461, Enter: 13, ' ': 32, ArrowLeft: 37, ArrowRight: 39, ArrowUp: 38, ArrowDown: 40 };
+    if (map[e.key]) { e.preventDefault(); sendKey(map[e.key]); }
+  });
+
+  function soap(action, args) {
+    var body = '<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:' + action +
+      ' xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID>' + (args || '') + '</u:' + action + '></s:Body></s:Envelope>';
+    return fetch('/dlna/avt/control', { method: 'POST', headers: { 'Content-Type': 'text/xml; charset="utf-8"', SOAPACTION: '"urn:schemas-upnp-org:service:AVTransport:1#' + action + '"' }, body: body }).then(function (r) { return r.text().then(function (t) { return { status: r.status, text: t }; }); });
+  }
+  function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  document.getElementById('cast').onclick = function () {
+    var url = document.getElementById('url').value.trim();
+    var didl = '<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"><item id="0" parentID="-1" restricted="1"><dc:title>模拟器推送</dc:title><upnp:class>object.item.videoItem</upnp:class><res protocolInfo="http-get:*:video/mp4:*">' + esc(url) + '</res></item></DIDL-Lite>';
+    soap('SetAVTransportURI', '<CurrentURI>' + esc(url) + '</CurrentURI><CurrentURIMetaData>' + esc(didl) + '</CurrentURIMetaData>')
+      .then(function () { return soap('Play', '<Speed>1</Speed>'); });
+  };
+  document.getElementById('pause').onclick = function () { soap('Pause'); };
+  document.getElementById('play').onclick = function () { soap('Play', '<Speed>1</Speed>'); };
+  document.getElementById('stop').onclick = function () { soap('Stop'); };
+
+  var st = document.getElementById('status');
+  setInterval(function () {
+    fetch('/status').then(function (r) { return r.json(); }).then(function (j) {
+      var r = j.renderer;
+      st.textContent = 'renderer: ' + r.state + ' ' + r.position.toFixed(1) + '/' + r.duration.toFixed(1) + ' vol ' + r.volume + '\n' +
+        'uri: ' + (r.uri || '-').slice(0, 60) + '\n' +
+        'tv: ' + (j.tv.online ? 'online ' + (j.tv.client && j.tv.client.ip) : 'offline') + ' queued ' + j.tv.queued + ' seq ' + j.tv.seq;
+    }).catch(function () {});
+  }, 1000);
+})();
+</script>
+</body>
+</html>

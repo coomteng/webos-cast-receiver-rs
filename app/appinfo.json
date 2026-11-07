@@ -1,0 +1,14 @@
+{
+  "id": "com.ting.cast",
+  "version": "0.2.3",
+  "vendor": "ting",
+  "type": "web",
+  "main": "index.html",
+  "title": "投屏接收",
+  "icon": "icon.png",
+  "largeIcon": "largeIcon.png",
+  "resolution": "1920x1080",
+  "disableBackHistoryAPI": true,
+  "handlesRelaunch": false,
+  "supportTouchMode": "none"
+}

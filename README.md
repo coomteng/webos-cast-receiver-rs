@@ -1,11 +1,13 @@
 # webos-cast-receiver-rs
 
-Rust port of the server side of [webos-cast-receiver](https://github.com/coomteng/webos-cast-receiver):
-a DLNA **MediaRenderer** that lives on a LAN server and relays casts (the 抖音
+A DLNA **MediaRenderer** that lives on a LAN server and relays casts (the 抖音
 "投屏 TV" button, or anything speaking UPnP AVTransport) to a tiny web app on an
-LG webOS TV. Same protocol surface, same HTTP routes, same TV app, same
-environment variables and `DATA_DIR/uuid` file as the Node version, so the two
-are drop-in replacements for each other.
+LG webOS TV. Server in Rust, TV app in plain ES5 (`app/`), browser simulator
+in `sim/`. Successor of the Node implementation
+[webos-cast-receiver](https://github.com/coomteng/webos-cast-receiver)
+(archived): same protocol surface, same HTTP routes, same TV app, same
+environment variables and `DATA_DIR/uuid` file, so it was a drop-in
+replacement.
 
 ```
 phone ──SSDP / SOAP AVTransport / GENA──▶ cast-receiver-rs (host network, :8790)
@@ -13,7 +15,7 @@ phone ──SSDP / SOAP AVTransport / GENA──▶ cast-receiver-rs (host netwo
                                             │                passes Range through, rewrites HLS
                                             ├─ /tv/poll      screens long-poll for load/play/pause/seek/stop
                                             ├─ /tv/state     screens report state/position (→ GetPositionInfo, LastChange)
-                                            └─ /tv/ /sim /   the TV app itself (served from the Node repo's app/ + sim/)
+                                            └─ /tv/ /sim /   the TV app itself (app/ + sim/)
 LG TV app (com.ting.cast) or any browser at / ──XHR──▶ /tv/*;  <video src=http://server:8790/proxy/…>
 ```
 
@@ -36,8 +38,8 @@ cargo run --release                        # http://<lan-ip>:8790, advertises on
 cargo test                                 # 50 tests: unit + HTTP end-to-end + proxy against a fake CDN
 ```
 
-Static assets: by default the binary looks for `app/` and `sim/` next to the
-executable, in the cwd, or in a sibling checkout `../webos-cast-receiver/`.
+Static assets: by default the binary looks for `app/` and `sim/` in the cwd,
+next to the executable, or in this repository (`cargo run` from anywhere).
 Override with `APP_DIR` / `SIM_DIR`.
 
 Environment (identical to the Node version): `FRIENDLY_NAME` (default
@@ -50,8 +52,37 @@ hosts; also the advertised IP), `ADVERTISE_HOST`, `PROXY_MODE` = `always` |
 Docker: `compose.portainer.yml` pulls `ghcr.io/coomteng/webos-cast-receiver-rs`
 (built by GitHub Actions on every push/tag; `TAG` env selects a version,
 default `latest`) — **must** use `network_mode: host` (multicast). `Dockerfile`
-builds the same image locally. Both clone the Node repo for `app/` and `sim/`
-at `ARG APP_REF` (currently `v0.2.3`); bump it when the TV app changes.
+builds the same image locally; `app/` and `sim/` are copied in from this repo.
+
+## TV app
+
+A prebuilt ipk for the author's LAN (server at 192.168.0.9:8790) is attached to
+each [GitHub release](https://github.com/coomteng/webos-cast-receiver-rs/releases);
+for any other network build your own as below.
+
+`app/` is plain ES5 + flexbox (webOS 4.4 = Chrome 53; one ES2015 token kills the
+script). `tools/es5check.sh` gates it with acorn. Keys: OK/Play/Pause toggle,
+←/→ ±10 s, ⏪/⏩ ±30 s, Stop/Back stop, Back again exits. Magic Remote: click
+toggles, moving shows the OSD, clicking the bar seeks.
+
+```sh
+echo SERVER_BASE=http://192.168.0.9:8790 > local.env
+tools/build_ipk.sh                         # substitutes the server address, packages dist/*.ipk
+ares-install --device <tv> dist/com.ting.cast_*.ipk
+ares-launch  --device <tv> com.ting.cast
+```
+
+The TV app only talks to the server over HTTP (`/tv/poll`, `/tv/state`), so a
+server-only release does not require reinstalling the ipk; rebuild it only when
+`app/` changes. Developer Mode setup for old LG TVs: see the notes in
+[coomteng/moontv-webos](https://github.com/coomteng/moontv-webos).
+
+## Testing without a TV or phone
+
+- `http://<server>:8790/sim/` — scaled TV + remote + a "fake phone" that pushes a URL via SOAP.
+- `node tools/cast.js` lists MediaRenderers on the LAN; `node tools/cast.js <url> [name]`
+  casts to one, subscribes to events and prints position every second
+  (zero-dependency Node script, dev tool only; not part of the image).
 
 ## What is implemented
 
@@ -95,6 +126,12 @@ src/
 tests/
   e2e.rs         fake phone (SOAP + GENA callback server) + fake screens over real HTTP
   proxy.rs       fake CDN: redirect, Range, HEAD, 403/502, HLS rewrite, mid-body RST
+app/             the webOS TV app (ES5): appinfo.json, index.html, js/{api,app,player}.js, css/
+sim/             browser simulator (TV + remote + fake phone) served at /sim/
+tools/
+  build_ipk.sh   ares-package the TV app with SERVER_BASE from local.env substituted
+  es5check.sh    acorn ecmaVersion:5 parse gate for app/js/*.js
+  cast.js        fake phone / DLNA control point for the command line
 ```
 
 Dependencies: tokio, axum, reqwest (rustls + ring, no OpenSSL/cmake), socket2,
@@ -102,4 +139,4 @@ serde_json, uuid, regex, rand, url, if-addrs, httpdate.
 
 ## License
 
-MIT, same as the original.
+MIT.

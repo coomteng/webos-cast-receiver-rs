@@ -70,8 +70,8 @@ fn load_uuid(data_dir: &Path) -> String {
     v
 }
 
-/// Default static dirs: `<exe dir>/app`, `<cwd>/app`, or the sibling Node
-/// checkout `../webos-cast-receiver/app` (single source of truth in dev).
+/// Default static dirs: `<cwd>/app`, `<exe dir>/app`, or `app/` in this
+/// repository (`cargo run` from anywhere in dev).
 fn default_static_dir(name: &str) -> PathBuf {
     let mut candidates = vec![PathBuf::from(name)];
     if let Ok(exe) = std::env::current_exe() {
@@ -79,8 +79,7 @@ fn default_static_dir(name: &str) -> PathBuf {
             candidates.push(d.join(name));
         }
     }
-    candidates.push(PathBuf::from("../webos-cast-receiver").join(name));
-    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../webos-cast-receiver").join(name));
+    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(name));
     candidates.into_iter().find(|p| p.join("index.html").is_file()).unwrap_or_else(|| PathBuf::from(name))
 }
 

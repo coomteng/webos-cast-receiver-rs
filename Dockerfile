@@ -9,18 +9,11 @@ COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 RUN cargo build --release --locked
 
-# Stage 2: the TV app + simulator are served from the Node project (single
-# source of truth); fetch them from GitHub at a pinned ref.
-FROM alpine:3 AS assets
-ARG APP_REPO=https://github.com/coomteng/webos-cast-receiver
-ARG APP_REF=v0.2.3
-RUN apk add --no-cache git && git clone --depth 1 --branch "$APP_REF" "$APP_REPO" /app-src
-
-# Stage 3: scratch image: binary + static assets, nothing else.
+# Stage 2: scratch image: binary + the TV app / simulator from this repo, nothing else.
 FROM scratch
 COPY --from=build /src/target/release/webos-cast-receiver /webos-cast-receiver
-COPY --from=assets /app-src/app /app
-COPY --from=assets /app-src/sim /sim
+COPY app /app
+COPY sim /sim
 # data/ holds the persistent device UUID (phones key their device cache on it).
 VOLUME ["/data"]
 ENV DATA_DIR=/data APP_DIR=/app SIM_DIR=/sim PORT=8790

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>投屏接收</title>
+  <meta name="viewport" content="width=1920, height=1080">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+  <video id="video" preload="auto"></video>
+
+  <!-- Idle screen: shown when nothing is playing -->
+  <div id="idle">
+    <div class="card">
+      <div class="dot" id="idle-dot"></div>
+      <div class="name" id="idle-name">客厅电视</div>
+      <div class="hint" id="idle-hint">正在连接接收服务…</div>
+      <div class="steps">
+        <div>手机和电视连同一个 Wi-Fi</div>
+        <div>抖音播放页 → 右侧「投屏 TV」→ 选择上面这个设备</div>
+      </div>
+      <div class="meta" id="idle-meta"></div>
+    </div>
+    <div class="foot"><span id="foot-ver"></span> · 返回键退出</div>
+  </div>
+
+  <!-- Spinner while a clip is loading -->
+  <div id="loading" class="hidden"><div class="spin"></div><div class="txt" id="loading-txt">正在加载…</div></div>
+
+  <!-- OSD over video: title + progress; auto-hides -->
+  <div id="osd" class="hidden">
+    <div class="title" id="osd-title"></div>
+    <div class="bar">
+      <span class="t" id="osd-cur">0:00</span>
+      <div class="track" id="osd-track"><div class="fill" id="osd-fill"></div></div>
+      <span class="t" id="osd-dur">0:00</span>
+      <span class="st" id="osd-state"></span>
+    </div>
+  </div>
+
+  <div id="toast" class="hidden"></div>
+  <!-- Browser autoplay policy: shown while playing muted, until the first click/key -->
+  <div id="unmute" class="hidden"><span class="ico">🔇</span> 浏览器静音播放中 — 点击画面或按确认键开启声音</div>
+
+  <script src="js/api.js"></script>
+  <script src="js/player.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
