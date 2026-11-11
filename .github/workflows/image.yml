@@ -100,11 +100,17 @@ jobs:
 
       - name: Build and push
         uses: docker/build-push-action@v6
+        env:
+          # The build record artifact carries the push event payload too.
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
         with:
           context: .
           file: Dockerfile.ci
           platforms: linux/amd64,linux/arm64
           push: true
+          # No provenance attestation: it embeds the full push event payload
+          # (including the pusher's e-mail address) into the public image.
+          provenance: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
