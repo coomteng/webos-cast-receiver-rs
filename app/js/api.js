@@ -38,8 +38,13 @@ var API = (function () {
     });
   }
 
+  /* This app's own version (tools/build_ipk.sh checks it against appinfo.json).
+     The server reports its version separately in /tv/info. */
+  var APP_VERSION = '0.3.1';
+
   return {
     base: BASE,
+    version: APP_VERSION,
     info: function () { return request('GET', '/tv/info', null, 8000); },
     /* Long poll: server holds up to 25 s; our timeout is a bit longer. */
     role: ROLE,

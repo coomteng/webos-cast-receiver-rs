@@ -100,10 +100,11 @@ var App = (function () {
     API.info().then(function (info) {
       deviceName = info.name || '';
       idleName.textContent = info.name || '投屏接收';
-      idleMeta.textContent = '接收服务 ' + info.host + ':' + info.port + ' · 版本 ' + info.version;
-      footVer.textContent = 'v' + info.version;
+      idleMeta.textContent = '接收服务 ' + info.host + ':' + info.port + ' · 服务版本 ' + info.version;
+      footVer.textContent = 'App v' + API.version;
     }, function () {
       idleMeta.textContent = '接收服务 ' + API.base.replace(/^https?:\/\//, '');
+      footVer.textContent = 'App v' + API.version;
       setTimeout(fetchInfo, 5000);
     });
   }

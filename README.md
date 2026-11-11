@@ -75,6 +75,9 @@ follow playback. ↑ / ↓ or the yellow key (or the 歌词 button with the poin
 switch the lyrics off and on; they are on by default and the choice is kept for
 every following track until it is switched again.
 
+While something is playing the app refuses the TV's screen saver (webOS asks
+via `registerScreenSaverRequest`); paused, stopped or idle it lets it start.
+
 Lyrics come from the server the track is streamed from. One kind of source is
 known today, an LX Music web player server: a stream URL of the form
 `/api/stream/track?source=&songmid=` is mapped to `/api/lyric` on the same
