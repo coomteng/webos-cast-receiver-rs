@@ -40,7 +40,7 @@ var API = (function () {
 
   /* This app's own version (tools/build_ipk.sh checks it against appinfo.json).
      The server reports its version separately in /tv/info. */
-  var APP_VERSION = '0.3.1';
+  var APP_VERSION = '0.3.2';
 
   return {
     base: BASE,

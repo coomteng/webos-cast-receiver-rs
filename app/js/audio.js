@@ -55,6 +55,48 @@ var AudioFace = (function () {
     if (lyricsOn) root.classList.remove('nolyr'); else root.classList.add('nolyr');
   }
 
+  /* ---- backdrop ----
+     A soft, dark wash of the cover's colours, drawn once per track:
+     shrink the cover to 12x7 pixels, scale that up (the scaling is the blur),
+     darken it, and add faint noise so the 8-bit gradient does not band. */
+  var BG_W = 480, BG_H = 270;
+  function makeBackdrop(img) {
+    var small = document.createElement('canvas');
+    small.width = 12; small.height = 7;
+    small.getContext('2d').drawImage(img, 0, 0, 12, 7);
+    var c = document.createElement('canvas');
+    c.width = BG_W; c.height = BG_H;
+    var x = c.getContext('2d');
+    x.imageSmoothingEnabled = true;
+    x.drawImage(small, 0, 0, BG_W, BG_H);
+    x.fillStyle = 'rgba(10,11,16,0.72)';
+    x.fillRect(0, 0, BG_W, BG_H);
+    var d = x.getImageData(0, 0, BG_W, BG_H), p = d.data;
+    for (var i = 0; i < p.length; i += 4) {
+      var n = (Math.random() + Math.random() - 1) * 3;
+      p[i] += n; p[i + 1] += n; p[i + 2] += n;
+    }
+    x.putImageData(d, 0, 0);
+    return c.toDataURL('image/png');
+  }
+
+  /* Needs a CORS-readable copy of the cover; if the art server does not allow
+     that (or anything else fails) the plain dark background simply stays. */
+  function loadBackdrop(t) {
+    bg.classList.add('off');
+    if (!t.art) return;
+    var im = new Image();
+    im.crossOrigin = 'anonymous';
+    im.onload = function () {
+      if (track !== t) return;
+      try {
+        bg.style.backgroundImage = 'url(' + makeBackdrop(im) + ')';
+        bg.classList.remove('off');
+      } catch (e) { /* tainted canvas: no backdrop */ }
+    };
+    im.src = t.art;
+  }
+
   /* ---- lyrics ---- */
   function setEmpty(msg) { empty.textContent = msg || ''; }
 
@@ -146,16 +188,12 @@ var AudioFace = (function () {
     label.style.backgroundColor = colorOf(t.title || '');
     art.style.display = 'none';
     art.removeAttribute('src');
-    bg.style.backgroundImage = 'none';
     if (t.art) {
-      art.onload = function () {
-        if (track !== t) return;
-        art.style.display = '';
-        bg.style.backgroundImage = 'url("' + t.art.replace(/"/g, '%22') + '")';
-      };
+      art.onload = function () { if (track === t) art.style.display = ''; };
       art.onerror = function () { art.style.display = 'none'; };
       art.src = t.art;
     }
+    loadBackdrop(t);
     curEl.textContent = '0:00'; durEl.textContent = '--:--'; fill.style.width = '0%';
     stateEl.textContent = '';
     root.classList.remove('playing');

@@ -42,13 +42,19 @@ html, body {
   position: absolute; top: 0; left: 0; width: 1920px; height: 1080px;
   background: #0f1117; overflow: hidden;
 }
+/* The backdrop is a picture made once per track by audio.js (cover shrunk to
+   a few pixels, scaled up, darkened, dithered) -- NOT a live CSS blur.
+   On the OLED55B8 a full-screen blur(60px) layer cost two thirds of the frame
+   rate (21 fps, the record visibly stuttered) and showed colour banding. */
 #audio .bg {
-  position: absolute; top: -120px; left: -120px; width: 2160px; height: 1320px;
-  background-size: cover; background-position: center;
-  -webkit-filter: blur(60px); filter: blur(60px);
+  position: absolute; top: 0; left: 0; width: 1920px; height: 1080px;
+  background-size: 1920px 1080px; background-repeat: no-repeat;
+  /* Its own compositor layer: otherwise the full-screen picture is repainted
+     with every step of the record (measured: ~9% late frames vs ~1.5%). */
   -webkit-transform: translateZ(0); transform: translateZ(0);
+  -webkit-transition: opacity 0.6s ease; transition: opacity 0.6s ease;
 }
-#audio .shade { position: absolute; top: 0; left: 0; width: 1920px; height: 1080px; background: rgba(10,11,16,0.72); }
+#audio .bg.off { opacity: 0; }
 
 #audio .left {
   position: absolute; top: 0; left: 110px; width: 740px; height: 1080px;
@@ -57,12 +63,17 @@ html, body {
   text-align: center;
 }
 #audio.nolyr .left { left: 590px; }
-#audio .turntable { position: relative; width: 600px; height: 600px; -webkit-flex: none; flex: none; }
+/* The drop shadow sits on the turntable, which does not move: on the disc
+   itself the big blurred shadow was repainted at every rotation step. */
+#audio .turntable {
+  position: relative; width: 600px; height: 600px; -webkit-flex: none; flex: none;
+  border-radius: 300px; box-shadow: 0 24px 80px rgba(0,0,0,0.55);
+}
 #audio .disc {
   position: absolute; top: 0; left: 0; width: 600px; height: 600px; border-radius: 300px;
   background-color: #10121c;
   background-image: repeating-radial-gradient(circle, rgba(255,255,255,0.05) 0, rgba(255,255,255,0.05) 1px, rgba(255,255,255,0) 1px, rgba(255,255,255,0) 5px);
-  box-shadow: 0 24px 80px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(255,255,255,0.06);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06);
   -webkit-animation: vinyl-spin 14s linear infinite; animation: vinyl-spin 14s linear infinite;
   -webkit-animation-play-state: paused; animation-play-state: paused;
   will-change: transform;
