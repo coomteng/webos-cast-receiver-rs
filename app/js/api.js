@@ -45,6 +45,8 @@ var API = (function () {
     role: ROLE,
     client: CLIENT,
     poll: function (after) { return request('GET', '/tv/poll?client=' + CLIENT + '&role=' + ROLE + '&after=' + encodeURIComponent(after), null, 32000); },
+    /* Lyrics of the item with this load id: {loadId, lyric, tlyric[, stale][, error]} */
+    lyric: function (loadId) { return request('GET', '/tv/lyric?loadId=' + encodeURIComponent(loadId), null, 15000); },
     state: function (report) { report.client = CLIENT; report.role = ROLE; return request('POST', '/tv/state', report, 8000); }
   };
 })();

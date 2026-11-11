@@ -4,12 +4,14 @@
 //!   SUBSCRIBE|UNSUBSCRIBE /dlna/{avt,rcs,cms}/event  GENA
 //!   /proxy/<id>                                      media relay
 //!   /tv/poll /tv/state /tv/info                      TV app channel
+//!   /tv/lyric                                        lyrics of the current item
 //!   /tv/ /sim /                                      static (TV app, simulator)
 //!   /status /healthz                                 ops
 use crate::actions;
 use crate::config::Config;
 use crate::device_xml::{avt_scpd, cms_scpd, device_description, rcs_scpd, DeviceIdentity, AVT, CMS, RCS};
 use crate::gena::{Gena, HttpNotifier, Service};
+use crate::lyrics::{lyric_url, Lyrics};
 use crate::proxy::Proxy;
 use crate::renderer::{Command, Renderer, Screen, TvReport};
 use crate::soap::{action_from_soapaction, soap_fault, soap_response, UpnpError};
@@ -39,6 +41,7 @@ pub struct App {
     pub tv: Arc<TvChannel>,
     pub gena: Arc<Gena>,
     pub proxy: Arc<Proxy>,
+    pub lyrics: Lyrics,
 }
 
 pub type Shared = Arc<App>;
@@ -90,7 +93,7 @@ pub fn build(cfg: Config) -> (Shared, Router) {
         Arc::new(move |svc| initial_state(&r2.lock().unwrap(), svc)),
         verbose,
     );
-    let app = Arc::new(App { cfg, renderer, tv, gena, proxy });
+    let app = Arc::new(App { cfg, renderer, tv, gena, proxy, lyrics: Lyrics::new(verbose) });
     tokio::spawn(app.gena.clone().run(ev_rx));
     // Sweep: detect screens that stopped polling/reporting.
     let a2 = app.clone();
@@ -113,6 +116,7 @@ pub fn build(cfg: Config) -> (Shared, Router) {
         .route("/tv/poll", any(tv_poll))
         .route("/tv/state", any(tv_state))
         .route("/tv/info", any(tv_info))
+        .route("/tv/lyric", any(tv_lyric))
         .route("/healthz", get(|| async { json_res(StatusCode::OK, json!({"ok": true})) }))
         .route("/status", get(status))
         .fallback(static_files)
@@ -371,6 +375,30 @@ async fn tv_info(State(app): State<Shared>, method: Method) -> Response<Body> {
     }
     let c = &app.cfg;
     json_res(StatusCode::OK, json!({"name": c.friendly_name, "host": c.advertise_host, "port": c.port, "uuid": c.uuid, "version": VERSION}))
+}
+
+#[derive(Deserialize)]
+struct LyricQuery {
+    #[serde(rename = "loadId")]
+    load_id: Option<String>,
+}
+
+/// Lyrics of the item the renderer currently holds. A screen asking about an
+/// older load (it raced a new SetAVTransportURI) gets `stale` and no text.
+async fn tv_lyric(State(app): State<Shared>, Query(q): Query<LyricQuery>, method: Method) -> Response<Body> {
+    if method == Method::OPTIONS {
+        return cors_preflight();
+    }
+    let (load_id, url) = {
+        let r = app.renderer.lock().unwrap();
+        (r.load_id, lyric_url(&r.uri, &r.title, &r.track.artist))
+    };
+    if let Some(want) = q.load_id.as_deref().and_then(|v| v.parse::<u64>().ok()) {
+        if want != load_id {
+            return json_res(StatusCode::OK, json!({"loadId": want, "lyric": "", "tlyric": "", "stale": true}));
+        }
+    }
+    json_res(StatusCode::OK, app.lyrics.get(load_id, url).await)
 }
 
 // ---- ops -------------------------------------------------------------------------

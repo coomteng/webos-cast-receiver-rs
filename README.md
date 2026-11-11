@@ -15,6 +15,7 @@ phone ──SSDP / SOAP AVTransport / GENA──▶ cast-receiver-rs (host netwo
                                             │                passes Range through, rewrites HLS
                                             ├─ /tv/poll      screens long-poll for load/play/pause/seek/stop
                                             ├─ /tv/state     screens report state/position (→ GetPositionInfo, LastChange)
+                                            ├─ /tv/lyric     lyrics of the current item, fetched from the track's own server
                                             └─ /tv/ /sim /   the TV app itself (app/ + sim/)
 LG TV app (com.ting.cast) or any browser at / ──XHR──▶ /tv/*;  <video src=http://server:8790/proxy/…>
 ```
@@ -35,7 +36,7 @@ after a full cast through the proxy (idle ~5 MB).
 
 ```sh
 cargo run --release                        # http://<lan-ip>:8790, advertises on SSDP
-cargo test                                 # 50 tests: unit + HTTP end-to-end + proxy against a fake CDN
+cargo test                                 # 56 tests: unit + HTTP end-to-end + proxy against a fake CDN
 ```
 
 Static assets: by default the binary looks for `app/` and `sim/` in the cwd,
@@ -64,6 +65,21 @@ for any other network build your own as below.
 script). `tools/es5check.sh` gates it with acorn. Keys: OK/Play/Pause toggle,
 ←/→ ±10 s, ⏪/⏩ ±30 s, Stop/Back stop, Back again exits. Magic Remote: click
 toggles, moving shows the OSD, clicking the bar seeks.
+
+### Music
+
+An item pushed as `object.item.audioItem*` (or with an `audio/*` res) gets the
+audio face instead of a black picture: a spinning record with the cover
+(`upnp:albumArtURI`) as its label, title / artist / progress, and lyrics that
+follow playback. ↑ / ↓ or the yellow key (or the 歌词 button with the pointer)
+switch the lyrics off and on; they are on by default and the choice is kept for
+every following track until it is switched again.
+
+Lyrics come from the server the track is streamed from. One kind of source is
+known today, an LX Music web player server: a stream URL of the form
+`/api/stream/track?source=&songmid=` is mapped to `/api/lyric` on the same
+host, which answers `{lyric, tlyric}` as LRC text. Any other audio plays with
+the same face and no lyrics.
 
 ```sh
 echo SERVER_BASE=http://192.168.0.9:8790 > local.env

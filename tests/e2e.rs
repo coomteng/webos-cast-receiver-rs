@@ -225,3 +225,62 @@ async fn gena_renew_unsubscribe_and_cors() {
     assert_eq!(o.header("access-control-allow-origin"), Some("*"));
     assert_eq!(req(&base, "GET", "/dlna/avt/control", &[], None).await.status, 405);
 }
+
+/// The audio face asks us for lyrics; we ask the server the track came from.
+#[tokio::test]
+async fn lyrics_come_from_the_tracks_own_server() {
+    let base = start("2000").await;
+    let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![]));
+    let s2 = seen.clone();
+    let lx = serve(Arc::new(move |_m, p, _h, _b| {
+        s2.lock().unwrap().push(p.clone());
+        if p.starts_with("/api/lyric?") && p.contains("songmid=1&") {
+            let body = json!({"lyric": "[00:01.00]第一行\n[00:05.00]第二行", "tlyric": "", "from": null}).to_string();
+            (200, h(&[("Content-Type", "application/json")]), body.into_bytes())
+        } else {
+            (502, h(&[("Content-Type", "application/json")]), b"{\"error\":\"lyric kw failed\"}".to_vec())
+        }
+    }))
+    .await;
+    let didl = "&lt;DIDL-Lite&gt;&lt;item&gt;&lt;upnp:class&gt;object.item.audioItem.musicTrack&lt;/upnp:class&gt;&lt;dc:title&gt;歌名&lt;/dc:title&gt;&lt;upnp:artist&gt;歌手&lt;/upnp:artist&gt;&lt;/item&gt;&lt;/DIDL-Lite&gt;";
+    let set = |mid: u32| format!("<CurrentURI>{lx}/api/stream/track?source=kw&amp;songmid={mid}&amp;quality=320k</CurrentURI><CurrentURIMetaData>{didl}</CurrentURIMetaData>");
+
+    // nothing pushed yet
+    let r = get(&base, "/tv/lyric?loadId=0").await.json();
+    assert_eq!(r["lyric"], "");
+
+    assert_eq!(soap(&base, "avt", "SetAVTransportURI", &set(1)).await.status, 200);
+    let st = get(&base, "/status").await.json();
+    assert_eq!(st["renderer"]["kind"], "audio");
+    assert_eq!(st["renderer"]["artist"], "歌手");
+    let r = get(&base, "/tv/lyric?loadId=1").await;
+    assert_eq!(r.header("access-control-allow-origin"), Some("*"), "the TV app is a file:// page");
+    let r = r.json();
+    assert_eq!(r["loadId"], 1);
+    assert!(r["lyric"].as_str().unwrap().contains("第二行"));
+    let asked = seen.lock().unwrap().last().cloned().unwrap();
+    assert!(asked.contains("source=kw") && asked.contains("singer=%E6%AD%8C%E6%89%8B") && asked.contains("name=%E6%AD%8C%E5%90%8D"), "{asked}");
+    // asked again for the same item: answered from memory
+    let n = seen.lock().unwrap().len();
+    assert!(get(&base, "/tv/lyric?loadId=1").await.json()["lyric"].as_str().unwrap().contains("第一行"));
+    assert_eq!(seen.lock().unwrap().len(), n);
+
+    // next track: the source fails -> empty text, and the old lyric must not leak
+    assert_eq!(soap(&base, "avt", "SetAVTransportURI", &set(2)).await.status, 200);
+    let r = get(&base, "/tv/lyric?loadId=2").await.json();
+    assert_eq!(r["lyric"], "");
+    assert!(r["error"].as_str().unwrap().contains("502"));
+    // a screen still asking about the previous item
+    let r = get(&base, "/tv/lyric?loadId=1").await.json();
+    assert_eq!(r["stale"], true);
+    assert_eq!(r["lyric"], "");
+
+    // not an LX stream: no lyric source, nobody is asked
+    let n = seen.lock().unwrap().len();
+    soap(&base, "avt", "SetAVTransportURI", "<CurrentURI>http://cdn/a.mp4</CurrentURI><CurrentURIMetaData></CurrentURIMetaData>").await;
+    let r = get(&base, "/tv/lyric?loadId=3").await.json();
+    assert_eq!(r["lyric"], "");
+    assert!(r.get("error").is_none());
+    assert_eq!(seen.lock().unwrap().len(), n);
+    assert_eq!(get(&base, "/status").await.json()["renderer"]["kind"], "video");
+}

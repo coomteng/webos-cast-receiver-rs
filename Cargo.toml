@@ -1,6 +1,6 @@
 [package]
 name = "webos-cast-receiver"
-version = "0.2.4"
+version = "0.3.0"
 edition = "2021"
 description = "DLNA MediaRenderer that relays casts (Douyin TV button etc.) to an LG webOS TV app — Rust port"
 license = "MIT"

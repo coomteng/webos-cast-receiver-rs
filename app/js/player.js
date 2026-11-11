@@ -1,5 +1,6 @@
 /* player.js — <video> wrapper + OSD. ES5 only.
- * Player.load({loadId,url,title,autoplay}) / play / pause / stop / seek / setVolume / setMute
+ * Player.load({loadId,url,title,artist,art,kind,autoplay}) / play / pause / stop / seek / setVolume / setMute
+ * kind 'audio' puts the audio face (audio.js) over the picture; anything else is the video path.
  * Emits reports through Player.onReport(fn): {loadId,state,position,duration,volume,mute,error} */
 var Player = (function () {
   'use strict';
@@ -15,7 +16,7 @@ var Player = (function () {
   var osdFill = document.getElementById('osd-fill');
   var osdState = document.getElementById('osd-state');
 
-  var current = null;      // {loadId,url,title}
+  var current = null;      // {loadId,url,title,artist,art,audio}
   var reportFn = null;
   var osdTimer = null;
   var lastState = 'idle';
@@ -47,12 +48,31 @@ var Player = (function () {
     if (reportFn) reportFn(r);
   }
 
+  var idleTimer = null;
   function showIdle(on) {
-    if (on) { idle.classList.remove('hidden'); osd.classList.add('hidden'); loading.classList.add('hidden'); }
+    if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+    if (on) { idle.classList.remove('hidden'); osd.classList.add('hidden'); loading.classList.add('hidden'); AudioFace.hide(); }
     else idle.classList.add('hidden');
   }
 
+  var faceNote = '';       // audio face status line while loading / buffering
+  function isAudio() { return !!(current && current.audio); }
+
+  /* Push the player's position and state to the audio face. */
+  function face() {
+    if (!AudioFace.visible()) return;
+    var playing = !!current && !video.paused && !video.ended;
+    AudioFace.update({
+      cur: isFinite(video.currentTime) ? video.currentTime : 0,
+      dur: isFinite(video.duration) ? video.duration : 0,
+      playing: playing && !faceNote,
+      note: faceNote || (current && video.paused && video.readyState >= 2 && !video.ended ? '已暂停' : '')
+    });
+  }
+
+  /* Video: full-screen spinner. Audio: a status line on the face, no overlay. */
   function showLoading(on, txt) {
+    if (isAudio()) { faceNote = on ? (txt || '正在加载…') : ''; loading.classList.add('hidden'); face(); return; }
     if (txt) loadingTxt.textContent = txt;
     if (on) loading.classList.remove('hidden'); else loading.classList.add('hidden');
   }
@@ -66,7 +86,7 @@ var Player = (function () {
   }
 
   function showOsd(ms) {
-    if (!current) return;
+    if (!current || current.audio) return;   // the audio face has its own progress bar
     updateOsd();
     osd.classList.remove('hidden');
     if (osdTimer) clearTimeout(osdTimer);
@@ -77,11 +97,11 @@ var Player = (function () {
 
   /* ---- video events ---- */
   video.addEventListener('loadstart', function () { report('loading'); });
-  video.addEventListener('loadedmetadata', function () { report(null); updateOsd(); });
+  video.addEventListener('loadedmetadata', function () { report(null); updateOsd(); face(); });
   video.addEventListener('playing', function () { if (waitTimer) { clearTimeout(waitTimer); waitTimer = null; } clearStall(); showLoading(false); showIdle(false); report('playing'); showOsd(3000); });
   video.addEventListener('play', function () { report(video.readyState >= 3 ? 'playing' : 'loading'); });
   /* readyState < 2 = the element never had data: that pause is the tail of a failed load, not the user. */
-  video.addEventListener('pause', function () { if (!video.ended && !terminal && current && video.readyState >= 2) { report('paused'); showOsd(0); } });
+  video.addEventListener('pause', function () { if (!video.ended && !terminal && current && video.readyState >= 2) { report('paused'); showOsd(0); } face(); });
   /* webOS fires 'waiting' liberally (seeks, tiny stalls). Only call it buffering if no
      progress for 1.5 s; a 'playing' event in between cancels it. */
   var waitTimer = null;
@@ -91,12 +111,14 @@ var Player = (function () {
     waitTimer = setTimeout(function () { waitTimer = null; if (current && video.readyState < 3) { showLoading(true, '缓冲中…'); report('loading'); } }, 1500);
   });
   video.addEventListener('canplay', function () { if (waitTimer) { clearTimeout(waitTimer); waitTimer = null; } showLoading(false); });
-  video.addEventListener('timeupdate', function () { if (!osd.classList.contains('hidden')) updateOsd(); });
+  video.addEventListener('timeupdate', function () { if (!osd.classList.contains('hidden')) updateOsd(); face(); });
+  video.addEventListener('seeked', face);
   video.addEventListener('ended', function () {
     clearStall();
     terminal = true;
     report('ended');
-    App.toast('播放完毕');
+    face();
+    if (!isAudio()) App.toast('播放完毕');   // music: the next track usually follows, stay quiet
     // Keep the last frame for a moment, then back to idle unless something new arrives.
     var id = current ? current.loadId : 0;
     setTimeout(function () { if (current && current.loadId === id) stop(true); }, 2500);
@@ -133,11 +155,13 @@ var Player = (function () {
        time cancels it and simply swaps src. Measured on OLED55B8 via CDP:
        load -> first byte request 1.35 s -> ~0.8 s. */
     cancelTeardown();
-    current = { loadId: cmd.loadId, url: cmd.url, title: cmd.title || '' };
+    current = { loadId: cmd.loadId, url: cmd.url, title: cmd.title || '', artist: cmd.artist || '', art: cmd.art || '', audio: cmd.kind === 'audio' };
     retried = false;
     terminal = false;
+    faceNote = '';
     osdTitle.textContent = current.title;
     showIdle(false);
+    if (current.audio) AudioFace.show(current); else AudioFace.hide();
     showLoading(true, '正在加载…');
     osd.classList.add('hidden');
     try { video.pause(); } catch (e) { /* ignore */ }
@@ -194,7 +218,9 @@ var Player = (function () {
     try { video.load(); } catch (e) { /* ignore */ }
   }
 
-  function stop(silent) {
+  var FACE_LINGER_MS = 1500;
+  /* `now`: leave the screen at once (another screen took over). */
+  function stop(silent, now) {
     clearStall();
     var had = !!current;
     current = null;
@@ -203,7 +229,17 @@ var Player = (function () {
     cancelTeardown();
     teardownTimer = setTimeout(teardown, TEARDOWN_DELAY_MS);
     if (needsUnmute) { needsUnmute = false; App.showUnmute(false); }
-    showIdle(true);
+    /* Music: control points send Stop just before the next track, and a
+       finished track is normally followed by another. Keep the face up for a
+       moment instead of flashing the idle screen between songs. */
+    if (AudioFace.visible() && !now) {
+      faceNote = '';
+      AudioFace.update({ cur: 0, dur: 0, playing: false, note: '' });
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(function () { idleTimer = null; if (!current) showIdle(true); }, FACE_LINGER_MS);
+    } else {
+      showIdle(true);
+    }
     if (had && !silent) report('stopped');
   }
 
@@ -238,13 +274,14 @@ var Player = (function () {
   }
 
   /* Another screen (the TV) took over: drop whatever we are showing, silently. */
-  function standby() { stop(true); }
+  function standby() { stop(true, true); }
 
   return {
     standby: standby, unmute: unmute, needsUnmute: function () { return needsUnmute; },
     load: load, play: play, pause: pause, stop: stop, seek: seek, seekBy: seekBy, togglePlay: togglePlay,
     setVolume: setVolume, setMute: setMute, showOsd: showOsd,
     isActive: function () { return !!current; },
+    isAudio: isAudio,
     isPaused: function () { return video.paused; },
     report: function () { report(null); },
     onReport: function (fn) { reportFn = fn; }

@@ -34,6 +34,93 @@ html, body {
 #idle .meta { margin-top: 40px; font-size: 22px; color: #5c6170; }
 #idle .foot { position: absolute; bottom: 40px; right: 60px; font-size: 22px; color: #5c6170; }
 
+/* ------------------------------------------------------------ audio face
+   Chrome 53: no `inset`, no two-position colour stops, no gap, no :has().
+   The record is plain DOM: .disc turns (grooves + cover label + spindle),
+   .sheen stays still above it so the light does not turn with the record. */
+#audio {
+  position: absolute; top: 0; left: 0; width: 1920px; height: 1080px;
+  background: #0f1117; overflow: hidden;
+}
+#audio .bg {
+  position: absolute; top: -120px; left: -120px; width: 2160px; height: 1320px;
+  background-size: cover; background-position: center;
+  -webkit-filter: blur(60px); filter: blur(60px);
+  -webkit-transform: translateZ(0); transform: translateZ(0);
+}
+#audio .shade { position: absolute; top: 0; left: 0; width: 1920px; height: 1080px; background: rgba(10,11,16,0.72); }
+
+#audio .left {
+  position: absolute; top: 0; left: 110px; width: 740px; height: 1080px;
+  display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column;
+  -webkit-align-items: center; align-items: center; -webkit-justify-content: center; justify-content: center;
+  text-align: center;
+}
+#audio.nolyr .left { left: 590px; }
+#audio .turntable { position: relative; width: 600px; height: 600px; -webkit-flex: none; flex: none; }
+#audio .disc {
+  position: absolute; top: 0; left: 0; width: 600px; height: 600px; border-radius: 300px;
+  background-color: #10121c;
+  background-image: repeating-radial-gradient(circle, rgba(255,255,255,0.05) 0, rgba(255,255,255,0.05) 1px, rgba(255,255,255,0) 1px, rgba(255,255,255,0) 5px);
+  box-shadow: 0 24px 80px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(255,255,255,0.06);
+  -webkit-animation: vinyl-spin 14s linear infinite; animation: vinyl-spin 14s linear infinite;
+  -webkit-animation-play-state: paused; animation-play-state: paused;
+  will-change: transform;
+}
+#audio.playing .disc { -webkit-animation-play-state: running; animation-play-state: running; }
+#audio .label {
+  position: absolute; top: 144px; left: 144px; width: 312px; height: 312px; border-radius: 156px;
+  overflow: hidden; background: #3b4252; box-shadow: 0 0 0 3px rgba(255,255,255,0.14);
+  line-height: 312px; font-size: 120px; font-weight: bold; color: rgba(255,255,255,0.85);
+}
+#audio .label img { position: absolute; top: 0; left: 0; width: 312px; height: 312px; border-radius: 156px; }
+#audio .hole {
+  position: absolute; top: 291px; left: 291px; width: 18px; height: 18px; border-radius: 9px;
+  background: #0b0d14; box-shadow: 0 0 0 3px rgba(255,255,255,0.12);
+}
+#audio .sheen {
+  position: absolute; top: 0; left: 0; width: 600px; height: 600px; border-radius: 300px;
+  background-image: linear-gradient(135deg, rgba(255,255,255,0) 30%, rgba(255,255,255,0.07) 50%, rgba(255,255,255,0) 70%);
+}
+@-webkit-keyframes vinyl-spin { to { -webkit-transform: rotate(360deg); } }
+@keyframes vinyl-spin { to { transform: rotate(360deg); } }
+
+#audio .title {
+  margin-top: 56px; width: 740px; font-size: 52px; font-weight: bold; color: #f2f2f5;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#audio .artist {
+  margin-top: 14px; width: 740px; font-size: 34px; color: #a9aebb;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#audio .bar { margin-top: 40px; width: 640px; display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; }
+#audio .bar .t { width: 96px; font-size: 26px; color: #a9aebb; text-align: left; }
+#audio .bar .t.r { text-align: right; }
+#audio .bar .track { -webkit-flex: 1; flex: 1; height: 6px; border-radius: 3px; background: rgba(255,255,255,0.2); position: relative; cursor: pointer; }
+#audio .bar .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 3px; background: #fad778; }
+#audio .st { margin-top: 18px; height: 34px; font-size: 26px; color: #fad778; }
+
+#audio .right { position: absolute; top: 90px; left: 930px; width: 900px; height: 900px; overflow: hidden; }
+#audio.nolyr .right { display: none; }
+#audio .list {
+  position: absolute; top: 0; left: 0; width: 900px;
+  -webkit-transition: -webkit-transform 0.45s ease-out; transition: transform 0.45s ease-out;
+  will-change: transform;
+}
+#audio .list.jump { -webkit-transition: none; transition: none; }
+#audio .row { padding: 15px 0; font-size: 42px; line-height: 1.35; color: rgba(255,255,255,0.34); }
+#audio .row .sub { font-size: 30px; margin-top: 4px; }
+#audio .row.on { color: #ffffff; font-weight: bold; }
+#audio .row.on .sub { color: #fad778; font-weight: normal; }
+#audio .list.untimed .row { color: rgba(255,255,255,0.72); }
+#audio .empty { position: absolute; top: 410px; left: 0; width: 900px; font-size: 38px; color: rgba(255,255,255,0.34); }
+
+#audio .lyrbtn {
+  position: absolute; top: 48px; right: 60px; padding: 10px 28px; border-radius: 28px;
+  font-size: 26px; color: #1a1400; background: #fad778; border: 2px solid #fad778; cursor: pointer;
+}
+#audio.nolyr .lyrbtn { color: #a9aebb; background: rgba(22,25,35,0.6); border-color: #4a5063; }
+
 /* ------------------------------------------------------------ loading */
 #loading {
   position: absolute; top: 0; left: 0; width: 1920px; height: 1080px;

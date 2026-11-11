@@ -56,6 +56,16 @@ pub struct Command {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub artist: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub album: Option<String>,
+    /// Cover art URL (DIDL `upnp:albumArtURI`), fetched by the screen itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub art: Option<String>,
+    /// `audio` | `video`: which player face the screen shows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub autoplay: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_at: Option<f64>,
@@ -69,7 +79,7 @@ pub struct Command {
 
 impl Command {
     pub fn new(cmd: &str) -> Self {
-        Command { cmd: cmd.into(), load_id: None, url: None, title: None, autoplay: None, start_at: None, position: None, volume: None, mute: None }
+        Command { cmd: cmd.into(), load_id: None, url: None, title: None, artist: None, album: None, art: None, kind: None, autoplay: None, start_at: None, position: None, volume: None, mute: None }
     }
 }
 
@@ -107,10 +117,35 @@ pub struct TvReport {
 }
 
 pub fn title_from_metadata(meta: &str) -> String {
+    track_meta(meta).title
+}
+
+/// What the screen needs to know about the pushed item, from its DIDL-Lite.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TrackMeta {
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub art: String,
+    /// True for `object.item.audioItem*`, or an `audio/*` res when no class is given.
+    pub audio: bool,
+}
+
+pub fn track_meta(meta: &str) -> TrackMeta {
     if meta.is_empty() {
-        return String::new();
+        return TrackMeta::default();
     }
-    tag_value(meta, "title").map(|t| xml_unescape(&t).trim().to_string()).unwrap_or_default()
+    let field = |names: &[&str]| {
+        names
+            .iter()
+            .filter_map(|n| tag_value(meta, n))
+            .map(|v| xml_unescape(&v).trim().to_string())
+            .find(|v| !v.is_empty())
+            .unwrap_or_default()
+    };
+    let class = field(&["class"]);
+    let audio = if class.is_empty() { meta.contains("http-get:*:audio/") } else { class.contains("audioItem") };
+    TrackMeta { title: field(&["title"]), artist: field(&["artist", "creator"]), album: field(&["album"]), art: field(&["albumArtURI"]), audio }
 }
 
 pub struct Renderer {
@@ -124,6 +159,7 @@ pub struct Renderer {
     pub uri: String,
     pub metadata: String,
     pub title: String,
+    pub track: TrackMeta,
     pub playable_uri: String,
     pub next_uri: String,
     pub next_metadata: String,
@@ -155,6 +191,7 @@ impl Renderer {
             uri: String::new(),
             metadata: String::new(),
             title: String::new(),
+            track: TrackMeta::default(),
             playable_uri: String::new(),
             next_uri: String::new(),
             next_metadata: String::new(),
@@ -181,6 +218,10 @@ impl Renderer {
         }
     }
 
+    pub fn kind(&self) -> &'static str {
+        if self.track.audio { "audio" } else { "video" }
+    }
+
     pub fn current_actions(&self) -> &'static str {
         match self.state {
             TransportState::Playing => "Pause,Stop,Seek,Next",
@@ -194,6 +235,7 @@ impl Renderer {
     pub fn snapshot(&self) -> Value {
         json!({
             "state": self.state.as_str(), "status": self.status, "uri": self.uri, "title": self.title,
+            "artist": self.track.artist, "album": self.track.album, "art": self.track.art, "kind": self.kind(),
             "position": self.position(), "duration": self.duration, "volume": self.volume, "mute": self.mute,
             "loadId": self.load_id, "nextUri": self.next_uri,
         })
@@ -227,6 +269,11 @@ impl Renderer {
         c.load_id = Some(self.load_id);
         c.url = Some(self.playable_uri.clone());
         c.title = Some(self.title.clone());
+        let some = |s: &String| if s.is_empty() { None } else { Some(s.clone()) };
+        c.artist = some(&self.track.artist);
+        c.album = some(&self.track.album);
+        c.art = some(&self.track.art);
+        c.kind = Some(self.kind().into());
         c.autoplay = Some(autoplay);
         c
     }
@@ -245,7 +292,8 @@ impl Renderer {
         self.load_id += 1;
         self.uri = uri.to_string();
         self.metadata = metadata.to_string();
-        self.title = title_from_metadata(metadata);
+        self.track = track_meta(metadata);
+        self.title = self.track.title.clone();
         self.playable_uri = (self.to_playable)(uri);
         self.duration = 0.0;
         self.pos = 0.0;
@@ -540,6 +588,43 @@ pub mod tests {
     }
 
     const DIDL: &str = "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><item id=\"1\"><dc:title>猫猫视频</dc:title></item></DIDL-Lite>";
+
+    /// What BubbleUPnP pushes for a track browsed from the LX DLNA server.
+    pub const MUSIC_DIDL: &str = "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><item id=\"t/kw/61988/320k\" parentID=\"0\" restricted=\"1\"><upnp:class>object.item.audioItem.musicTrack</upnp:class><dc:title>一个男人的眼泪</dc:title><dc:creator>任贤齐</dc:creator><upnp:artist>任贤齐</upnp:artist><upnp:albumArtURI>http://lx:3940/art?source=kw&amp;songmid=61988</upnp:albumArtURI><upnp:album>认真 精选辑</upnp:album><res protocolInfo=\"http-get:*:audio/mpeg:DLNA.ORG_OP=01\" duration=\"0:03:51.000\">http://lx:3939/api/stream/track?source=kw&amp;songmid=61988&amp;quality=320k</res></item></DIDL-Lite>";
+
+    #[test]
+    fn track_meta_from_didl() {
+        let m = track_meta(MUSIC_DIDL);
+        assert_eq!(m.title, "一个男人的眼泪");
+        assert_eq!(m.artist, "任贤齐");
+        assert_eq!(m.album, "认真 精选辑", "album must not be confused with albumArtURI");
+        assert_eq!(m.art, "http://lx:3940/art?source=kw&songmid=61988");
+        assert!(m.audio);
+        // video item / no metadata / class-less audio res
+        assert!(!track_meta(DIDL).audio);
+        assert_eq!(track_meta(""), TrackMeta::default());
+        assert!(track_meta("<DIDL-Lite><item><dc:title>x</dc:title><res protocolInfo=\"http-get:*:audio/mpeg:*\">u</res></item></DIDL-Lite>").audio);
+        assert!(!track_meta("<DIDL-Lite><item><upnp:class>object.item.videoItem</upnp:class><res protocolInfo=\"http-get:*:audio/mpeg:*\">u</res></item></DIDL-Lite>").audio, "class wins over res");
+        // creator is the fallback when there is no artist
+        assert_eq!(track_meta("<x><dc:creator>甲</dc:creator></x>").artist, "甲");
+    }
+
+    #[test]
+    fn load_command_carries_track_info() {
+        let mut h = make(true);
+        h.r.set_uri("http://lx:3939/api/stream/track?source=kw&songmid=61988&quality=320k", MUSIC_DIDL).unwrap();
+        let c = h.last();
+        assert_eq!(c.kind.as_deref(), Some("audio"));
+        assert_eq!(c.artist.as_deref(), Some("任贤齐"));
+        assert_eq!(c.album.as_deref(), Some("认真 精选辑"));
+        assert_eq!(c.art.as_deref(), Some("http://lx:3940/art?source=kw&songmid=61988"));
+        assert_eq!(h.r.snapshot()["kind"], "audio");
+        // the next item has no metadata: nothing may leak over from the previous one
+        h.r.set_uri("http://cdn/a.mp4", "").unwrap();
+        let c = h.last();
+        assert_eq!(c.kind.as_deref(), Some("video"));
+        assert_eq!((c.artist, c.album, c.art), (None, None, None));
+    }
 
     #[test]
     fn initial_state() {

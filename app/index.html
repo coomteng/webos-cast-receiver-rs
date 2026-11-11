@@ -25,6 +25,35 @@
     <div class="foot"><span id="foot-ver"></span> · 返回键退出</div>
   </div>
 
+  <!-- Audio face: shown instead of the (black) video picture for music.
+       Spinning record with the cover as its label, track info, lyrics. -->
+  <div id="audio" class="hidden">
+    <div class="bg" id="au-bg"></div>
+    <div class="shade"></div>
+    <div class="left">
+      <div class="turntable">
+        <div class="disc" id="au-disc">
+          <div class="label" id="au-label"><span id="au-char"></span><img id="au-art" alt=""></div>
+          <div class="hole"></div>
+        </div>
+        <div class="sheen"></div>
+      </div>
+      <div class="title" id="au-title"></div>
+      <div class="artist" id="au-artist"></div>
+      <div class="bar">
+        <span class="t" id="au-cur">0:00</span>
+        <div class="track" id="au-track"><div class="fill" id="au-fill"></div></div>
+        <span class="t r" id="au-dur">0:00</span>
+      </div>
+      <div class="st" id="au-state"></div>
+    </div>
+    <div class="right" id="au-lyr">
+      <div class="list" id="au-list"></div>
+      <div class="empty" id="au-empty"></div>
+    </div>
+    <div class="lyrbtn" id="au-lyrbtn">歌词 ▲▼</div>
+  </div>
+
   <!-- Spinner while a clip is loading -->
   <div id="loading" class="hidden"><div class="spin"></div><div class="txt" id="loading-txt">正在加载…</div></div>
 
@@ -44,6 +73,8 @@
   <div id="unmute" class="hidden"><span class="ico">🔇</span> 浏览器静音播放中 — 点击画面或按确认键开启声音</div>
 
   <script src="js/api.js"></script>
+  <script src="js/lyrics.js"></script>
+  <script src="js/audio.js"></script>
   <script src="js/player.js"></script>
   <script src="js/app.js"></script>
 </body>

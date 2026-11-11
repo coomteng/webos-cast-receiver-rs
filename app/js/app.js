@@ -126,7 +126,10 @@ var App = (function () {
       case 39: Player.seekBy(10); break;
       case 412: Player.seekBy(-30); break;
       case 417: Player.seekBy(30); break;
-      case 38: case 40: Player.showOsd(3000); break;
+      case 38: case 40: /* Up / Down */
+      case 405:         /* Yellow */
+        if (Player.isAudio()) toggleLyrics(); else if (code !== 405) Player.showOsd(3000); else handled = false;
+        break;
       case 461: /* Back */
       case 27:
         if (Player.isActive()) Player.stop(); else window.close();
@@ -134,6 +137,16 @@ var App = (function () {
       default: handled = false;
     }
     if (handled) e.preventDefault();
+  });
+
+  /* Lyrics on/off (audio face). The choice sticks until it is changed again. */
+  function toggleLyrics() { toast(AudioFace.toggleLyrics() ? '歌词已打开' : '歌词已关闭'); }
+  document.getElementById('au-lyrbtn').addEventListener('click', function (e) { e.stopPropagation(); toggleLyrics(); });
+  document.getElementById('au-track').addEventListener('click', function (e) {
+    e.stopPropagation();
+    var r = this.getBoundingClientRect();
+    var v = document.getElementById('video');
+    if (isFinite(v.duration)) Player.seek((e.clientX - r.left) / r.width * v.duration);
   });
 
   /* Magic Remote pointer: click toggles play/pause; moving the pointer shows the OSD. */

@@ -1,6 +1,6 @@
 {
   "id": "com.ting.cast",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "vendor": "ting",
   "type": "web",
   "main": "index.html",
