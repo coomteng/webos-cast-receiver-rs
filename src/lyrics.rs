@@ -58,7 +58,12 @@ fn answer(load_id: u64, lyric: &str, tlyric: &str) -> Value {
 impl Lyrics {
     pub fn new(verbose: bool) -> Self {
         crate::util::install_crypto();
+        // Lyric sources are plain `http://` servers on the LAN. Like the GENA
+        // and proxy clients, do not load the system CA store: the release
+        // image is `scratch` and has none, and building a verifying client
+        // there fails at startup.
         let client = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
             .connect_timeout(Duration::from_secs(3))
             // A first-time lyric makes the source search its upstreams.
             .timeout(Duration::from_secs(10))

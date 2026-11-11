@@ -36,7 +36,7 @@ after a full cast through the proxy (idle ~5 MB).
 
 ```sh
 cargo run --release                        # http://<lan-ip>:8790, advertises on SSDP
-cargo test                                 # 56 tests: unit + HTTP end-to-end + proxy against a fake CDN
+cargo test                                 # 57 tests: unit + HTTP end-to-end + proxy against a fake CDN
 ```
 
 Static assets: by default the binary looks for `app/` and `sim/` in the cwd,
