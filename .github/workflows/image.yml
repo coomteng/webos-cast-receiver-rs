@@ -34,6 +34,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # TEMPORARY (added 2026-11-11) -- REMOVE once the hosted runners resolve
+      # the Ubuntu archive hosts again.
+      # Since ~13:48 UTC on 2026-11-11 the runners' default resolver (Azure,
+      # 168.63.129.16) times out on every Canonical name (archive / security /
+      # ports.ubuntu.com), so the apt step below fails with "Temporary failure
+      # resolving". Upstream: actions/runner-images#15296 and #15297.
+      # To revert: delete this step; nothing else depends on it.
+      - name: TEMPORARY DNS override for apt (see comment, remove later)
+        run: |
+          IF=$(ip -o route get 1.1.1.1 | sed -E 's/.* dev ([^ ]+).*/\1/')
+          sudo resolvectl dns "$IF" 1.1.1.1 1.0.0.1
+          sudo resolvectl flush-caches
+
       - name: musl C toolchain (ring has a little C)
         run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
 
